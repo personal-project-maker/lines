@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14121a">
+<title>Lines</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<style>
+:root{
+  --bg:#14121a; --panel:#1f1c28; --panel2:#2a2636; --text:#f4f1ea; --muted:#a9a3b8;
+  --accent:#f2c14e; --ok:#6fd08c; --bad:#ff7a7a; --warn:#ffb86b; --line:#3a3548;
+  --fs:20px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:var(--fs);line-height:1.45}
+button{font:inherit;color:inherit;border:0;border-radius:16px;padding:16px 18px;background:var(--panel2);cursor:pointer;min-height:56px;touch-action:manipulation}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:#1b1608;font-weight:700}
+button.danger{background:#5a2330}
+button.ghost{background:transparent;border:2px solid var(--line)}
+button[disabled]{opacity:.45}
+.wrap{max-width:720px;margin:0 auto;padding:16px 16px 40px}
+h1{font-size:1.5em;margin:.2em 0 .1em}
+h2{font-size:1.15em;margin:1em 0 .4em}
+.muted{color:var(--muted)}
+.small{font-size:.8em}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>button{flex:1 1 140px}
+.card{background:var(--panel);border-radius:18px;padding:16px}
+.view{display:none}
+.view.on{display:block}
+label.set{display:flex;flex-direction:column;gap:6px;padding:12px 0;border-bottom:1px solid var(--line)}
+label.check{flex-direction:row;align-items:center;justify-content:space-between}
+input[type=range]{width:100%;height:36px}
+input[type=checkbox]{width:30px;height:30px}
+select{font:inherit;padding:12px;border-radius:12px;background:var(--panel2);color:var(--text);border:0}
+/* run view */
+.topbar{display:flex;align-items:center;gap:10px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5}
+.topbar .title{flex:1;font-weight:700;font-size:.9em}
+.topbar button{min-height:48px;padding:10px 14px;font-size:.85em}
+#status{font-size:.85em;display:flex;align-items:center;gap:8px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--muted);display:inline-block}
+.dot.live{background:var(--ok);animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.35}}
+#script{background:var(--panel);border-radius:18px;padding:16px;min-height:38vh;max-height:46vh;overflow-y:auto}
+.u{margin:0 0 .7em}
+.u.cur{border-left:4px solid var(--accent);padding-left:10px;margin-left:-14px}
+.w{display:inline}
+.w.hid{color:transparent;background:var(--panel2);border-radius:6px;user-select:none}
+.ahead .w.hid{color:var(--muted);background:transparent}
+.w.prov{color:var(--accent)}
+.w.miss{color:var(--bad);text-decoration:underline wavy}
+.w.wrong{color:var(--warn);text-decoration:underline}
+.heard{font-size:.7em;color:var(--warn);vertical-align:super}
+.extra{font-size:.75em;color:var(--warn);text-decoration:line-through}
+.cue{color:var(--muted);font-size:.85em;border-left:3px solid var(--line);padding-left:10px;margin:0 0 .7em}
+.cue b{font-weight:600}
+.scenehead{color:var(--accent);font-size:.75em;text-transform:uppercase;letter-spacing:.06em;margin:.4em 0 .5em}
+#bigprompt{width:100%;min-height:22vh;font-size:1.25em;font-weight:700;margin-top:12px;background:#2f2a14;color:var(--accent);border:2px solid #5a4d1c;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+#bigprompt .ptext{font-size:1.15em;color:var(--text);font-weight:600}
+#bigprompt .phint{font-size:.7em;font-weight:400;color:var(--muted)}
+.overlay{position:fixed;inset:0;background:rgba(10,8,14,.94);display:none;z-index:20;overflow-y:auto}
+.overlay.on{display:block}
+.overlay .wrap{padding-top:28px}
+.diff{font-size:1.1em;background:var(--panel);border-radius:18px;padding:16px;margin:12px 0}
+.legend{font-size:.75em;color:var(--muted);margin-top:6px}
+.bar{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-top:6px}
+.bar>i{display:block;height:100%;background:var(--ok)}
+.scene-row{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.scene-row .row>button{min-height:48px;padding:10px;font-size:.85em}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.75em;background:var(--panel2);margin-left:6px}
+.pill.bad{background:#5a2330}
+.pill.ok{background:#1f4a2c}
+#drillcue{font-size:.95em}
+#drilltarget{font-size:1.15em;min-height:3em}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--panel2);padding:12px 18px;border-radius:14px;display:none;z-index:30;max-width:90vw}
+.toast.on{display:block}
+.warnbox{background:#3a2a14;border-radius:14px;padding:12px 14px;font-size:.85em}
+.sr{position:absolute;left:-9999px}
+</style>
+</head>
+<body>
+
+<!-- LOAD -->
+<section id="v-load" class="view"><div class="wrap stack">
+  <h1>Lines</h1>
+  <p>Load your script to start. You only need to do this once on this phone; it stays saved here and isn't uploaded anywhere.</p>
+  <label class="card stack"><span>Choose the script file (.json, or a .txt with one line per row)</span>
+    <input id="file" type="file" accept=".json,.txt,application/json,text/plain"></label>
+  <p class="muted small">Or paste the script text below, one line per row.</p>
+  <textarea id="pastebox" rows="6" style="font:inherit;font-size:.8em;border-radius:12px;padding:10px;background:var(--panel);color:var(--text);border:1px solid var(--line)"></textarea>
+  <button id="pastebtn">Use pasted text</button>
+</div></section>
+
+<!-- HOME -->
+<section id="v-home" class="view"><div class="wrap stack">
+  <div><h1 id="h-title">Lines</h1><div class="muted small" id="h-sub"></div></div>
+  <div id="micwarn" class="warnbox" style="display:none"></div>
+  <button class="primary" id="b-run-start" style="min-height:80px;font-size:1.15em">Run from the beginning</button>
+  <button id="b-run-cont">Carry on from where I stopped</button>
+  <button id="b-revise" style="min-height:70px">Focused revision <span class="pill" id="weakcount"></span></button>
+  <div class="row"><button id="b-progress">Scenes and progress</button><button id="b-settings">Settings</button></div>
+</div></section>
+
+<!-- RUN -->
+<section id="v-run" class="view"><div class="wrap">
+  <div class="topbar">
+    <button id="r-exit" aria-label="Stop and go back">Stop</button>
+    <div class="title" id="r-title"></div>
+    <button id="r-pause">Pause</button>
+  </div>
+  <div id="status" aria-live="polite"><span class="dot" id="r-dot"></span><span id="r-status">Ready</span></div>
+  <div id="script" aria-live="off"></div>
+  <button id="bigprompt"><span class="ptext" id="r-ptext">Prompt me</span><span class="phint" id="r-phint">or say "line"</span></button>
+  <div class="row" style="margin-top:12px">
+    <button id="r-mark" class="danger">Mark a mistake</button>
+    <button id="r-next" style="display:none" class="primary">Got it, next line</button>
+  </div>
+</div></section>
+
+<!-- STOP OVERLAY -->
+<div id="o-stop" class="overlay" role="dialog" aria-modal="true" aria-labelledby="o-stop-h"><div class="wrap stack">
+  <h2 id="o-stop-h">Not quite</h2>
+  <div class="diff" id="o-diff"></div>
+  <div class="legend">Red wavy: words you missed. Orange: words that came out differently (what it heard is shown small). Crossed out: extra words.</div>
+  <button class="primary" id="o-retry" style="min-height:70px">Try that line again</button>
+  <button id="o-carry">Carry on</button>
+  <button id="o-misheard" class="ghost">It misheard me, that was right</button>
+</div></div>
+
+<!-- END OVERLAY -->
+<div id="o-end" class="overlay" role="dialog" aria-modal="true"><div class="wrap stack">
+  <h2>End of the run</h2>
+  <div id="o-endtext"></div>
+  <button class="primary" id="o-end-revise">Revise the tricky bits</button>
+  <button id="o-end-home">Back to start</button>
+</div></div>
+
+<!-- DRILL -->
+<section id="v-drill" class="view"><div class="wrap stack">
+  <div class="topbar"><button id="d-exit">Stop</button><div class="title" id="d-title">Focused revision</div><span class="muted small" id="d-count"></span></div>
+  <div class="card"><div class="muted small">Cue</div><div id="drillcue"></div>
+    <button class="ghost" id="d-hearcue" style="margin-top:10px;min-height:48px;font-size:.85em">Read the cue aloud</button></div>
+  <div class="card"><div class="muted small">Your line</div><div id="drilltarget"></div></div>
+  <div id="d-status" class="muted small" aria-live="polite"></div>
+  <button id="d-prompt" style="min-height:90px;background:#2f2a14;color:var(--accent);font-weight:700">Prompt me</button>
+  <div class="row" id="d-judge">
+    <button class="primary" id="d-got">I got it</button>
+    <button class="danger" id="d-miss">I didn't</button>
+  </div>
+  <div class="row" id="d-after" style="display:none">
+    <button class="primary" id="d-next">Next</button>
+    <button class="ghost" id="d-misheard">It misheard me</button>
+  </div>
+</div></section>
+
+<!-- PROGRESS -->
+<section id="v-progress" class="view"><div class="wrap">
+  <div class="topbar"><button id="p-back">Back</button><div class="title">Scenes and progress</div></div>
+  <p class="muted small">Green bar: lines you've said cleanly. Tap a scene to run from there or revise just that scene.</p>
+  <div id="p-list"></div>
+</div></section>
+
+<!-- SETTINGS -->
+<section id="v-settings" class="view"><div class="wrap">
+  <div class="topbar"><button id="s-back">Back</button><div class="title">Settings</div></div>
+  <label class="set">Pause before it prompts you: <b><span id="s-pause-v"></span> seconds</b>
+    <input type="range" id="s-pause" min="2" max="20" step="1"></label>
+  <label class="set">How strict
+    <select id="s-strict">
+      <option value="strict">Strict: every word must be exact</option>
+      <option value="normal">Normal: ignore small words and near misses</option>
+      <option value="gentle">Gentle: only stop for bigger slips</option>
+    </select></label>
+  <label class="set">How to check lines
+    <select id="s-mode">
+      <option value="listen">Listen to me (microphone)</option>
+      <option value="tap">Tap only (no microphone)</option>
+    </select></label>
+  <label class="set check">Show the script ahead of me (faintly) <input type="checkbox" id="s-ahead"></label>
+  <label class="set check">Show other characters' lines as cues <input type="checkbox" id="s-cues"></label>
+  <label class="set check">Include my lines in pre-recorded scenes <input type="checkbox" id="s-pre"></label>
+  <label class="set check">Read prompts aloud <input type="checkbox" id="s-speak"></label>
+  <label class="set">Text size <input type="range" id="s-fs" min="16" max="30" step="1"></label>
+  <h2>Script</h2>
+  <div class="stack">
+    <button id="s-load">Load a different script</button>
+    <button id="s-reset" class="danger">Reset all my progress</button>
+    <div id="s-confirm" class="card stack" style="display:none"><div>Clear every mistake and score? This can't be undone.</div>
+      <div class="row"><button class="danger" id="s-reset-yes">Yes, reset</button><button id="s-reset-no">Cancel</button></div></div>
+  </div>
+</div></section>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+/* ---------- storage ---------- */
+const store={
+  get(k,d){try{const v=localStorage.getItem('lines.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+  set(k,v){try{localStorage.setItem('lines.'+k,JSON.stringify(v))}catch(e){}}
+};
+const DEFAULTS={pause:5,strict:'normal',mode:'listen',ahead:false,cues:true,pre:true,speak:false,fs:20};
+let S=Object.assign({},DEFAULTS,store.get('settings',{}));
+const EMBED=null;/*EMBED*/
+const NO_MIC=false;/*NOMIC*/
+let SCRIPT=EMBED||store.get('script',null);
+if(NO_MIC)S.mode='tap';
+let STATS=store.get('stats',{});     // unitId -> {m:mistakes,p:prompts,c:clean,box:0..5,last:ts}
+const saveStats=()=>store.set('stats',STATS);
+const $=id=>document.getElementById(id);
+function toast(msg,ms=2200){const t=$('toast');t.textContent=msg;t.classList.add('on');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('on'),ms)}
+function show(v){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id==='v-'+v));window.scrollTo(0,0)}
+function applyFs(){document.documentElement.style.setProperty('--fs',S.fs+'px')}
+
+/* ---------- text normalisation ---------- */
+const ONES=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+const TENS=['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+function numWords(n){
+  if(n<20)return ONES[n];
+  if(n<100)return TENS[Math.floor(n/10)]+(n%10?' '+ONES[n%10]:'');
+  if(n<1000)return ONES[Math.floor(n/100)]+' hundred'+(n%100?' and '+numWords(n%100):'');
+  if(n<10000)return numWords(Math.floor(n/1000))+' thousand'+(n%1000?' '+numWords(n%1000):'');
+  return String(n);
+}
+const ALIAS={okay:'ok',mister:'mr',hr:'hour',hrs:'hours',ya:'you',gonna:'going',cause:'because',cos:'because'};
+function toks(s){
+  const out=[];
+  s=s.toLowerCase().replace(/[’‘`]/g,"'").replace(/[“”"«»]/g,' ').replace(/…/g,' ').replace(/[–—]/g,' ');
+  for(let piece of s.split(/[\s\-\/]+/)){
+    piece=piece.replace(/[^a-z0-9'*]/g,'').replace(/'/g,'');
+    if(!piece)continue;
+    for(const r of piece.match(/\d+|[a-z*]+/g)||[]){
+      if(/^\d+$/.test(r)){
+        const n=parseInt(r,10);
+        if(n>=1000&&n<10000&&r.length===4&&n>=1100&&n<2100&&n%100!==0){out.push(...(numWords(Math.floor(n/100))+' '+numWords(n%100)).split(' '))}
+        else out.push(...numWords(n).split(' ').filter(x=>x!=='and'||n<100));
+      } else if(r==='mph')out.push('miles','per','hour'); else out.push(ALIAS[r]||r);
+    }
+  }
+  return out;
+}
+const STOP=new Set('a an the and of to so but then in on at is it its i im me my we our you your they them their he she his her that this these those as or if for with be been was are am do did dont just oh well now yes no not by from up all'.split(' '));
+const FILLER=new Set(['um','uh','er','erm','ah','hmm','mm','uhm']);
+function lev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let p=Array.from({length:n+1},(_,i)=>i);for(let i=1;i<=m;i++){let c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
+function eq(a,b){ // a expected, b heard
+  if(a===b)return true;
+  if(b.includes('*')&&b[0]===a[0])return true;  // masked swear words
+  if(S.strict!=='strict'){
+    if(a.length>=4&&b.length>=4&&1-lev(a,b)/Math.max(a.length,b.length)>=0.75)return true;
+    if(a.length>=3&&b.length>=3&&(a+'s'===b||b+'s'===a))return true;
+  }
+  return false;
+}
+
+/* ---------- model ---------- */
+let UNITS=[], E=[]; // E: flat expected tokens {t,u}
+function buildModel(){
+  UNITS=[];E=[];
+  if(!SCRIPT)return;
+  SCRIPT.scenes.forEach((sc,si)=>{
+    let cues=[];
+    for(const it of sc.items){
+      if(it.cue){cues.push(it);continue}
+      if(sc.pre&&!S.pre){cues.push({cue:'You (pre-recorded)',t:it.t});continue}
+      const u={id:String(it.u),si,text:it.t,cues:cues,disp:[],start:E.length,idx:UNITS.length};
+      cues=[];
+      for(const w of it.t.split(/\s+/).filter(Boolean)){
+        const tk=toks(w);const d={w,from:E.length,to:E.length+tk.length};
+        tk.forEach(t=>E.push({t,u:u.idx}));u.disp.push(d);
+      }
+      u.end=E.length;
+      UNITS.push(u);
+    }
+  });
+}
+const sceneOf=u=>SCRIPT.scenes[u.si];
+function unitAt(p){if(p>=E.length)return null;return UNITS[E[p].u]}
+function st(id){return STATS[id]||(STATS[id]={m:0,p:0,c:0,box:0,last:0})}
+function isWeak(u){const s=STATS[u.id];return s&&(s.m+s.p)>0&&s.box<3}
+function weakUnits(){return UNITS.filter(isWeak).sort((a,b)=>(STATS[a.id].box-STATS[b.id].box)||((STATS[b.id].m+STATS[b.id].p)-(STATS[a.id].m+STATS[a.id].p)))}
+
+/* ---------- alignment ---------- */
+function align(H,p,maxLen){
+  const n=H.length,m=Math.min(E.length-p,maxLen);
+  const INF=1e9,dp=[],bt=[];
+  for(let i=0;i<=n;i++){dp.push(new Float64Array(m+1).fill(INF));bt.push(new Int8Array(m+1))}
+  dp[0][0]=0;
+  for(let i=0;i<=n;i++)for(let j=0;j<=m;j++){
+    const c=dp[i][j];if(c>=INF)continue;
+    const relax=(ii,jj,v,k)=>{if(v<dp[ii][jj]){dp[ii][jj]=v;bt[ii][jj]=k}};
+    if(i<n&&j<m)relax(i+1,j+1,c+(eq(E[p+j].t,H[i])?0:1),1);
+    if(j<m)relax(i,j+1,c+1,2);                                      // skipped expected word
+    if(i<n)relax(i+1,j,c+(FILLER.has(H[i])?0:1),3);                 // extra heard word
+    if(i<n&&j+1<m&&H[i]===E[p+j].t+E[p+j+1].t)relax(i+1,j+2,c,4);   // compound heard as one
+    if(i+1<n&&j<m&&H[i]+H[i+1]===E[p+j].t)relax(i+2,j+1,c,5);       // one word heard as two
+  }
+  let best=INF,bj=0;
+  for(let j=0;j<=m;j++){const v=dp[n][j]+ (j===0&&n>0?0.5:0);if(v<best-1e-9){best=v;bj=j}}
+  const ops=[];let i=n,j=bj;
+  while(i>0||j>0){
+    const k=bt[i][j];
+    if(k===1){ops.push({ty:eq(E[p+j-1].t,H[i-1])?'ok':'sub',e:p+j-1,h:H[i-1]});i--;j--}
+    else if(k===2){ops.push({ty:'del',e:p+j-1});j--}
+    else if(k===3){ops.push({ty:FILLER.has(H[i-1])?'fill':'ins',h:H[i-1],e:p+j});i--}
+    else if(k===4){ops.push({ty:'ok',e:p+j-1});ops.push({ty:'ok',e:p+j-2});i--;j-=2}
+    else if(k===5){ops.push({ty:'ok',e:p+j-1});i-=2;j--}
+    else break;
+  }
+  ops.reverse();
+  return {cost:dp[n][bj],j:bj,ops};
+}
+function significant(ops){
+  let errs=ops.filter(o=>o.ty==='sub'||o.ty==='del'||o.ty==='ins');
+  if(S.strict==='strict')return errs;
+  errs=errs.filter(o=>{const w=o.ty==='ins'?o.h:E[o.e].t;return !STOP.has(w)});
+  if(S.strict==='gentle'){
+    const covered=ops.filter(o=>o.ty!=='ins'&&o.ty!=='fill').length;
+    let run=0,maxRun=0;for(const o of ops){if(o.ty==='del'){run++;maxRun=Math.max(maxRun,run)}else run=0}
+    if(maxRun<3&&errs.length<=Math.floor(covered/8))return [];
+  }
+  return errs;
+}
+
+/* ---------- speech recognition ---------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const rec={obj:null,want:false,onFinal:null,onInterim:null,onActivity:null,lastFinal:'',
+  start(){
+    if(!SR)return false;this.want=true;if(this.obj)return true;
+    const r=new SR();r.lang='en-GB';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+    r.onresult=ev=>{
+      this.onActivity&&this.onActivity();
+      let interim='';
+      for(let i=ev.resultIndex;i<ev.results.length;i++){
+        const res=ev.results[i],tx=res[0].transcript;
+        if(res.isFinal){
+          if(tx.trim()&&tx!==this.lastFinal){this.lastFinal=tx;this.onFinal&&this.onFinal(tx)}
+        } else interim+=tx+' ';
+      }
+      if(interim.trim())this.onInterim&&this.onInterim(interim);
+    };
+    r.onerror=e=>{
+      if(e.error==='not-allowed'||e.error==='service-not-allowed'){this.want=false;micDenied()}
+      else if(e.error==='network'){toast('Speech recognition needs an internet connection')}
+    };
+    r.onend=()=>{this.obj=null;if(this.want)setTimeout(()=>{if(this.want)this.start()},250)};
+    try{r.start();this.obj=r}catch(e){this.obj=null}
+    return true;
+  },
+  stop(){this.want=false;this.lastFinal='';if(this.obj){try{this.obj.abort()}catch(e){}this.obj=null}}
+};
+function micDenied(){toast('Microphone blocked. Allow it in the browser, or switch to tap only in Settings.',4500);setRunStatus('Microphone blocked',false)}
+function useMic(){return !NO_MIC&&S.mode==='listen'&&!!SR}
+function say(text,after){
+  try{
+    if(!('speechSynthesis' in window)){after&&after();return}
+    const wasOn=rec.want;rec.stop();
+    const u=new SpeechSynthesisUtterance(text);u.lang='en-GB';u.rate=0.95;
+    u.onend=u.onerror=()=>{if(wasOn)rec.start();after&&after()};
+    speechSynthesis.cancel();speechSynthesis.speak(u);
+  }catch(e){after&&after()}
+}
+let wakeLock=null;
+async function keepAwake(on){try{if(on&&'wakeLock' in navigator){wakeLock=await navigator.wakeLock.request('screen')}else if(!on&&wakeLock){await wakeLock.release();wakeLock=null}}catch(e){}}
+
+/* ---------- prompts ---------- */
+function promptText(words,level){
+  if(!words.length)return '';
+  if(level<=1)return words[0]+' ...';
+  if(level===2)return words.slice(0,Math.min(4,words.length)).join(' ')+(words.length>4?' ...':'');
+  if(level===3)return words.map(w=>{const m=w.match(/[A-Za-z0-9’']/);if(!m)return w;const i=w.indexOf(m[0]);return w.slice(0,i+1)+'_'.repeat(Math.min(4,Math.max(1,w.replace(/[^A-Za-z]/g,'').length-1)))}).join(' ');
+  return words.join(' ');
+}
+const LEVEL_NAME=['','First word','First few words','First letters','Whole line'];
+
+/* ---------- RUN ---------- */
+const R={p:0,running:false,paused:false,stopped:false,level:0,lastAct:0,timer:null,prov:-1,runLog:{},promptedUnit:{},pendingErr:null};
+function setRunStatus(t,live){$('r-status').textContent=t;$('r-dot').classList.toggle('live',!!live)}
+function startRun(fromUnit){
+  if(!UNITS.length)return;
+  const u=UNITS[Math.max(0,Math.min(fromUnit,UNITS.length-1))];
+  Object.assign(R,{p:u.start,running:true,paused:false,stopped:false,level:0,lastAct:Date.now(),prov:-1,runLog:{},promptedUnit:{},pendingErr:null});
+  show('run');renderRun(true);keepAwake(true);
+  $('r-next').style.display=useMic()?'none':'';
+  $('r-phint').textContent=useMic()?'or say "line"':'tap for a prompt';
+  if(useMic()){
+    rec.onFinal=onRunFinal;rec.onInterim=onRunInterim;rec.onActivity=()=>{R.lastAct=Date.now()};
+    rec.start();setRunStatus('Listening. Start whenever you like.',true);
+  } else setRunStatus('Tap mode: say the line, then tap "Got it"',false);
+  clearInterval(R.timer);R.timer=setInterval(runTick,250);
+}
+function endRun(toHome=true){
+  R.running=false;clearInterval(R.timer);rec.stop();keepAwake(false);store.set('pos',R.p);
+  if(toHome){goHome()}
+}
+function runTick(){
+  if(!R.running||R.paused||R.stopped||!useMic())return;
+  if(Date.now()-R.lastAct>S.pause*1000){R.lastAct=Date.now();doPrompt()}
+}
+function curUnit(){return unitAt(R.p)}
+function remainingWords(u,p){return u.disp.filter(d=>d.to>p||(d.from===d.to&&d.from>=p)).map(d=>d.w)}
+function doPrompt(){
+  const u=curUnit();if(!u)return;
+  R.level=Math.min(4,R.level+1);
+  const words=remainingWords(u,R.p);const txt=promptText(words,R.level);
+  $('r-ptext').textContent=txt;$('r-phint').textContent=LEVEL_NAME[R.level]+(R.level<4?'. Tap again for more':'');
+  if(!R.promptedUnit[u.id]){R.promptedUnit[u.id]=1;const s=st(u.id);s.p++;s.box=0;s.last=Date.now();saveStats()}
+  R.runLog[u.id]=(R.runLog[u.id]||0)+1;
+  if(S.speak)say(R.level>=4?words.join(' '):txt.replace(/_+/g,'').replace(/\.\.\./g,''));
+}
+function resetPromptBox(){R.level=0;$('r-ptext').textContent='Prompt me';$('r-phint').textContent=useMic()?'or say "line"':'tap for a prompt'}
+function advanceTo(np){
+  const before=curUnit();
+  // units fully passed get a clean mark if no mistake/prompt this run
+  for(let k=before?before.idx:UNITS.length;k<UNITS.length&&UNITS[k].end<=np;k++){
+    const u=UNITS[k];
+    if(!R.runLog[u.id]){const s=st(u.id);s.c++;if(s.m+s.p>0)s.box=Math.min(5,s.box+1);s.last=Date.now()}
+  }
+  saveStats();
+  const changedUnit=unitAt(np)!==before;
+  R.p=np;R.prov=-1;store.set('pos',R.p);
+  if(changedUnit)resetPromptBox();
+  if(R.p>=E.length){finishRun();return}
+  renderRun(changedUnit);
+}
+function onRunInterim(tx){
+  if(R.stopped||R.paused)return;
+  const H=toks(tx);if(!H.length)return;
+  const a=align(H,R.p,H.length*2+8);
+  R.prov=R.p+a.j;renderRun(false);
+}
+function onRunFinal(tx){
+  if(R.stopped||R.paused||!R.running)return;
+  const H=toks(tx);if(!H.length)return;
+  if((H.length<=2&&H[0]==='line'&&(R.p>=E.length||E[R.p].t!=='line'))){doPrompt();return}
+  const a=align(H,R.p,H.length*2+10);
+  const errs=significant(a.ops);
+  if(!errs.length){advanceTo(R.p+a.j);return}
+  // error: stop
+  const firstE=errs.find(o=>o.e!=null&&o.e<E.length);
+  const u=firstE?unitAt(Math.min(firstE.e,E.length-1)):curUnit();
+  R.pendingErr={u,a,from:R.p,errs};
+  logMistake(u);
+  openStop();
+}
+function logMistake(u){if(!u)return;const s=st(u.id);s.m++;s.box=0;s.last=Date.now();R.runLog[u.id]=(R.runLog[u.id]||0)+1;saveStats()}
+function unlogMistake(u){if(!u)return;const s=st(u.id);s.m=Math.max(0,s.m-1);R.runLog[u.id]=Math.max(0,(R.runLog[u.id]||1)-1);if(!R.runLog[u.id])delete R.runLog[u.id];saveStats()}
+function openStop(){
+  R.stopped=true;rec.stop();setRunStatus('Stopped',false);
+  const {u,a,from}=R.pendingErr;
+  const opsByE={};const insBefore={};
+  for(const o of a.ops){if(o.ty==='ins'){(insBefore[o.e]=insBefore[o.e]||[]).push(o.h)}else if(o.e!=null)opsByE[o.e]=o}
+  const units=new Set();for(let k=from;k<from+Math.max(a.j,1)&&k<E.length;k++)units.add(E[k].u);
+  if(u)units.add(u.idx);
+  let html='';
+  [...units].sort((x,y)=>x-y).forEach(ui=>{
+    const uu=UNITS[ui];html+='<p class="u">';
+    for(const d of uu.disp){
+      let cls='',extra='';
+      for(let k=d.from;k<d.to;k++){
+        if(insBefore[k])extra+='<span class="extra">'+esc(insBefore[k].join(' '))+'</span> ';
+        const o=opsByE[k];if(!o)continue;
+        if(o.ty==='del'&&cls!=='wrong')cls='miss';
+        if(o.ty==='sub'){cls='wrong';extra+='';d._h=o.h}
+      }
+      html+=extra+'<span class="w '+cls+'">'+esc(d.w)+'</span>'+(cls==='wrong'&&d._h?'<span class="heard"> '+esc(d._h)+'</span>':'')+' ';
+      delete d._h;
+    }
+    html+='</p>';
+  });
+  $('o-diff').innerHTML=html;
+  $('o-stop').classList.add('on');$('o-retry').focus();
+}
+function closeStop(){$('o-stop').classList.remove('on');R.stopped=false;R.pendingErr=null;R.lastAct=Date.now();if(useMic()&&R.running&&!R.paused){rec.start();setRunStatus('Listening',true)}}
+$('o-retry').onclick=()=>{const {u}=R.pendingErr;R.p=u?u.start:R.p;R.prov=-1;resetPromptBox();closeStop();renderRun(true)};
+$('o-carry').onclick=()=>{const {a,from,u}=R.pendingErr;let np=from+a.j;if(np<=from&&u)np=u.end;closeStop();advanceTo(np)};
+$('o-misheard').onclick=()=>{const {a,from,u}=R.pendingErr;unlogMistake(u);let np=from+a.j;if(np<=from&&u)np=u.end;closeStop();advanceTo(np);toast('Got it, not counted as a mistake')};
+function finishRun(){
+  endRun(false);
+  const tricky=Object.keys(R.runLog).length;
+  $('o-endtext').innerHTML=tricky?`<p>You stopped on <b>${tricky}</b> line${tricky>1?'s':''} this run. They've been added to focused revision.</p>`:'<p>A clean run with no stops. Brilliant.</p>';
+  store.set('pos',0);
+  $('o-end').classList.add('on');
+}
+$('o-end-home').onclick=()=>{$('o-end').classList.remove('on');goHome()};
+$('o-end-revise').onclick=()=>{$('o-end').classList.remove('on');startDrill(weakUnits())};
+
+function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function renderRun(scroll){
+  const cu=curUnit();if(!cu)return;
+  const sc=sceneOf(cu);$('r-title').textContent=sc.id+' '+sc.title;
+  const lo=Math.max(0,cu.idx-3),hi=Math.min(UNITS.length-1,cu.idx+(S.ahead?4:1));
+  let html='',lastScene=-1;
+  for(let k=lo;k<=hi;k++){
+    const u=UNITS[k];
+    if(u.si!==lastScene){lastScene=u.si;const s2=sceneOf(u);html+='<div class="scenehead">'+esc(s2.id+' '+s2.title)+(s2.pre?' (pre-recorded)':'')+'</div>'}
+    if(S.cues&&u.idx>=cu.idx)for(const c of u.cues)html+='<div class="cue"><b>'+esc(c.cue)+':</b> '+esc(c.t)+'</div>';
+    if(k>cu.idx&&!S.ahead)continue;
+    html+='<p class="u'+(u===cu?' cur':'')+(S.ahead?' ahead':'')+'" id="'+(u===cu?'curu':'')+'">';
+    for(const d of u.disp){
+      let cls='';
+      if(d.from===d.to){cls=(k<cu.idx||d.from<R.p)?'':'hid'}
+      else if(d.to<=R.p)cls='';
+      else if(R.prov>=d.to)cls='prov';
+      else cls='hid';
+      html+='<span class="w '+cls+'">'+esc(d.w)+'</span> ';
+    }
+    html+='</p>';
+  }
+  const box=$('script');box.innerHTML=html;
+  const c=$('curu');if(c)box.scrollTop=Math.max(0,c.offsetTop-box.offsetTop-box.clientHeight*0.35);
+}
+$('bigprompt').onclick=()=>{if(R.running&&!R.stopped)doPrompt()};
+$('r-mark').onclick=()=>{
+  if(!R.running)return;
+  let u=curUnit();if(u&&R.p===u.start&&u.idx>0)u=UNITS[u.idx-1];
+  logMistake(u);toast('Marked a mistake on: "'+u.text.slice(0,40)+(u.text.length>40?'...':'')+'"');
+};
+$('r-next').onclick=()=>{const u=curUnit();if(!u)return;advanceTo(u.end)};
+$('r-pause').onclick=()=>{
+  R.paused=!R.paused;$('r-pause').textContent=R.paused?'Resume':'Pause';
+  if(R.paused){rec.stop();setRunStatus('Paused',false)}
+  else{R.lastAct=Date.now();if(useMic()){rec.start();setRunStatus('Listening',true)}else setRunStatus('Tap mode',false)}
+};
+$('r-exit').onclick=()=>endRun(true);
+
+/* ---------- DRILL ---------- */
+let drillBuf=[];
+const D={q:[],cur:null,level:0,done:0,total:0,lastAct:0,timer:null,judged:false,lastResult:null,prompted:false};
+function cueFor(u){
+  if(u.cues.length&&S.cues){const c=u.cues[u.cues.length-1];return {label:c.cue,text:c.t}}
+  if(u.idx>0&&UNITS[u.idx-1].si===u.si){const w=UNITS[u.idx-1].text.split(/\s+/);return {label:'Your previous line',text:(w.length>14?'... ':'')+w.slice(-14).join(' ')}}
+  const sc=sceneOf(u);return {label:'Start of scene',text:sc.id+' '+sc.title};
+}
+function startDrill(list,title){
+  if(!list.length){toast('Nothing to revise yet. Do a run first, and any stops will land here.',3500);goHome();return}
+  D.q=list.slice(0,10).map(u=>u.idx);D.total=D.q.length;D.done=0;
+  $('d-title').textContent=title||'Focused revision';
+  show('drill');keepAwake(true);nextDrill();
+  clearInterval(D.timer);D.timer=setInterval(drillTick,250);
+}
+function nextDrill(){
+  if(!D.q.length){endDrill(true);return}
+  D.cur=UNITS[D.q.shift()];D.level=0;D.judged=false;D.prompted=false;D.lastResult=null;D.lastAct=Date.now();
+  const c=cueFor(D.cur);
+  $('drillcue').innerHTML='<span class="muted small">'+esc(c.label)+':</span> '+esc(c.text);
+  $('drilltarget').innerHTML='<span class="muted">Say it from memory...</span>';
+  $('d-count').textContent=(D.done+1)+' of '+(D.done+D.q.length+1);
+  $('d-prompt').textContent='Prompt me';
+  $('d-judge').style.display='';$('d-after').style.display='none';$('d-prompt').style.display='';drillBuf=[];
+  $('d-misheard').style.display=useMic()?'':'none';
+  if(useMic()){
+    rec.onFinal=onDrillFinal;rec.onInterim=null;rec.onActivity=()=>{D.lastAct=Date.now()};
+    rec.start();$('d-status').textContent='Listening...';
+  } else $('d-status').textContent='Say the line, then tap "I got it" or "I didn\'t".';
+  $('d-got').textContent='I got it';
+}
+function drillTick(){if(D.cur&&!D.judged&&useMic()&&Date.now()-D.lastAct>S.pause*1000){D.lastAct=Date.now();drillPrompt()}}
+function drillPrompt(){
+  if(!D.cur||D.judged)return;
+  D.level=Math.min(4,D.level+1);D.prompted=true;
+  const words=D.cur.text.split(/\s+/);const txt=promptText(words,D.level);
+  $('drilltarget').textContent=txt;
+  $('d-prompt').textContent=D.level<4?LEVEL_NAME[D.level]+'. Tap for more':'Whole line shown';
+  if(S.speak)say(D.level>=4?D.cur.text:txt.replace(/_+/g,'').replace(/\.\.\./g,''));
+}
+$('d-prompt').onclick=drillPrompt;
+function onDrillFinal(tx){
+  if(!D.cur||D.judged)return;
+  const H=toks(tx);if(!H.length)return;
+  if(H.length<=2&&H[0]==='line'&&E[D.cur.start].t!=='line'){drillPrompt();return}
+  drillBuf.push(...H);
+  const a=align(drillBuf,D.cur.start,D.cur.end-D.cur.start);
+  const reached=D.cur.start+a.j;
+  const errs=significant(a.ops);
+  if(reached<D.cur.end&&!errs.length)return; // keep listening, not finished yet
+  judgeDrill(!errs.length,a);
+}
+function judgeDrill(ok,a){
+  D.judged=true;rec.stop();const buf=drillBuf;drillBuf=[];
+  D.lastResult={ok,a};
+  const s=st(D.cur.id);
+  const clean=ok&&!D.prompted;
+  if(clean){s.c++;s.box=Math.min(5,s.box+1)}else{if(!ok)s.m++;if(D.prompted)s.p++;s.box=0;const pos=Math.min(D.q.length,2);D.q.splice(pos,0,D.cur.idx)}
+  s.last=Date.now();saveStats();
+  // show the line with marks
+  let html='';
+  const opsByE={};if(a)for(const o of a.ops)if(o.ty!=='ins'&&o.ty!=='fill')opsByE[o.e]=o;
+  for(const d of D.cur.disp){
+    let cls='',h='';
+    for(let k=d.from;k<d.to;k++){const o=opsByE[k];if(!o){if(a&&k>=D.cur.start+a.j)cls=cls||'miss';continue}if(o.ty==='del')cls=cls||'miss';if(o.ty==='sub'){cls='wrong';h=o.h}}
+    html+='<span class="w '+cls+'">'+esc(d.w)+'</span>'+(h?'<span class="heard"> '+esc(h)+'</span>':'')+' ';
+  }
+  $('drilltarget').innerHTML=html;
+  $('d-status').textContent=clean?'Spot on.':ok?'Right, with a prompt. It will come back round.':'Not quite. It will come back round.';
+  $('d-judge').style.display='none';$('d-after').style.display='';$('d-prompt').style.display='none';
+  $('d-misheard').style.display=(useMic()&&!ok)?'':'none';
+  $('d-next').focus();
+}
+$('d-got').onclick=()=>{if(D.judged)return;rec.stop();drillBuf=[];judgeDrill(true,null);$('drilltarget').textContent=D.cur.text};
+$('d-miss').onclick=()=>{if(D.judged)return;rec.stop();drillBuf=[];judgeDrill(false,null);$('drilltarget').textContent=D.cur.text};
+$('d-next').onclick=()=>{D.done++;nextDrill()};
+$('d-misheard').onclick=()=>{
+  // undo the failure: count as correct
+  const s=st(D.cur.id);s.m=Math.max(0,s.m-1);if(!D.prompted){s.c++;s.box=Math.min(5,s.box+1)}
+  const i=D.q.indexOf(D.cur.idx);if(i>=0)D.q.splice(i,1);saveStats();
+  $('drilltarget').textContent=D.cur.text;$('d-status').textContent='Counted as right.';$('d-misheard').style.display='none';
+};
+$('d-hearcue').onclick=()=>{if(D.cur)say(cueFor(D.cur).text)};
+function endDrill(finished){
+  clearInterval(D.timer);rec.stop();keepAwake(false);D.cur=null;
+  if(finished)toast('Revision round done. Nice work.',3000);
+  goHome();
+}
+$('d-exit').onclick=()=>endDrill(false);
+
+/* ---------- PROGRESS ---------- */
+function renderProgress(){
+  let html='';
+  SCRIPT.scenes.forEach((sc,si)=>{
+    const us=UNITS.filter(u=>u.si===si);if(!us.length)return;
+    const clean=us.filter(u=>{const s=STATS[u.id];return s&&s.c>0&&!isWeak(u)}).length;
+    const weak=us.filter(isWeak).length;
+    html+=`<div class="scene-row"><div><b>${esc(sc.id+' '+sc.title)}</b>${sc.pre?' <span class="pill">pre-recorded</span>':''}
+      ${weak?`<span class="pill bad">${weak} tricky</span>`:''}<div class="bar"><i style="width:${Math.round(100*clean/us.length)}%"></i></div>
+      <div class="muted small">${us.length} line${us.length>1?'s':''}, ${clean} solid</div></div>
+      <div class="row"><button data-run="${us[0].idx}">Run from here</button><button data-rev="${si}" ${weak?'':'disabled'}>Revise this scene</button></div></div>`;
+  });
+  $('p-list').innerHTML=html;
+  $('p-list').querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>startRun(+b.dataset.run));
+  $('p-list').querySelectorAll('[data-rev]').forEach(b=>b.onclick=()=>{const si=+b.dataset.rev;startDrill(weakUnits().filter(u=>u.si===si),'Revising '+SCRIPT.scenes[si].id)});
+}
+$('b-progress').onclick=()=>{renderProgress();show('progress')};
+$('p-back').onclick=goHome;
+
+/* ---------- SETTINGS ---------- */
+function syncSettingsUI(){
+  $('s-pause').value=S.pause;$('s-pause-v').textContent=S.pause;$('s-strict').value=S.strict;$('s-mode').value=S.mode;
+  $('s-ahead').checked=S.ahead;$('s-cues').checked=S.cues;$('s-pre').checked=S.pre;$('s-speak').checked=S.speak;$('s-fs').value=S.fs;
+}
+function saveSettings(rebuild){store.set('settings',S);if(rebuild)buildModel()}
+$('s-pause').oninput=e=>{S.pause=+e.target.value;$('s-pause-v').textContent=S.pause;saveSettings()};
+$('s-strict').onchange=e=>{S.strict=e.target.value;saveSettings()};
+$('s-mode').onchange=e=>{S.mode=e.target.value;saveSettings()};
+$('s-ahead').onchange=e=>{S.ahead=e.target.checked;saveSettings()};
+$('s-cues').onchange=e=>{S.cues=e.target.checked;saveSettings()};
+$('s-pre').onchange=e=>{S.pre=e.target.checked;saveSettings(true);store.set('pos',0)};
+$('s-speak').onchange=e=>{S.speak=e.target.checked;saveSettings()};
+$('s-fs').oninput=e=>{S.fs=+e.target.value;applyFs();saveSettings()};
+$('b-settings').onclick=()=>{syncSettingsUI();show('settings')};
+$('s-back').onclick=goHome;
+$('s-load').onclick=()=>show('load');
+$('s-reset').onclick=()=>{$('s-confirm').style.display=''};
+$('s-reset-no').onclick=()=>{$('s-confirm').style.display='none'};
+$('s-reset-yes').onclick=()=>{STATS={};saveStats();store.set('pos',0);$('s-confirm').style.display='none';toast('Progress cleared')};
+
+/* ---------- LOAD ---------- */
+function setScript(obj){
+  if(!obj||!Array.isArray(obj.scenes))throw new Error('bad');
+  SCRIPT=obj;store.set('script',obj);buildModel();
+  if(!UNITS.length)throw new Error('empty');
+  store.set('pos',0);goHome();toast('Script loaded: '+UNITS.length+' lines');
+}
+function fromText(txt){
+  let n=0;const items=txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).map(t=>({u:++n,t}));
+  return {title:'My script',scenes:[{id:'1',title:'Script',pre:false,items}]};
+}
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const txt=await f.text();
+  try{setScript(/\.json$/i.test(f.name)||txt.trim().startsWith('{')?JSON.parse(txt):fromText(txt))}catch(err){toast("Couldn't read that file",3000)}
+};
+$('pastebtn').onclick=()=>{const t=$('pastebox').value;if(!t.trim())return;try{setScript(t.trim().startsWith('{')?JSON.parse(t):fromText(t))}catch(e){toast("Couldn't read that text",3000)}};
+
+/* ---------- HOME ---------- */
+function goHome(){
+  if(!SCRIPT){show('load');return}
+  $('h-title').textContent=SCRIPT.title||'Lines';
+  const words=E.length;$('h-sub').textContent=UNITS.length+' lines, about '+words+' words';
+  const pos=store.get('pos',0);
+  const pu=unitAt(pos);
+  $('b-run-cont').style.display=(pos>0&&pu)?'':'none';
+  if(pu)$('b-run-cont').textContent='Carry on from '+sceneOf(pu).id+' '+sceneOf(pu).title;
+  const w=weakUnits().length;$('weakcount').textContent=w?w+' to work on':'none yet';
+  const mw=$('micwarn');
+  if(S.mode==='listen'&&!SR){mw.style.display='';mw.textContent="This browser can't listen. Open this page in Chrome to use the microphone, or switch to tap only in Settings."}
+  else if(S.mode==='listen'&&!window.isSecureContext){mw.style.display='';mw.textContent='The microphone only works when this page is opened from a secure (https) address.'}
+  else mw.style.display='none';
+  show('home');
+}
+$('b-run-start').onclick=()=>startRun(0);
+$('b-run-cont').onclick=()=>{const pu=unitAt(store.get('pos',0));startRun(pu?pu.idx:0)};
+$('b-revise').onclick=()=>startDrill(weakUnits());
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(R.running||D.cur))keepAwake(true)});
+
+/* ---------- boot ---------- */
+applyFs();buildModel();goHome();
+window.__lines={toks,align,significant,E:()=>E,UNITS:()=>UNITS,R,D,onRunFinal,onDrillFinal,S,STATS:()=>STATS,setScript};
+</script>
+</body>
+</html>
