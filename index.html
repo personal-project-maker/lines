@@ -80,6 +80,13 @@ select{font:inherit;padding:12px;border-radius:12px;background:var(--panel2);col
 .toast.on{display:block}
 .warnbox{background:#3a2a14;border-radius:14px;padding:12px 14px;font-size:.85em}
 .sr{position:absolute;left:-9999px}
+.rl{display:block;width:100%;text-align:left;background:transparent;padding:6px 8px;min-height:0;border-radius:10px;margin:0 0 4px;line-height:1.45}
+.rl.tricky{border-left:4px solid var(--bad);background:#2a1a20}
+.rl.sel{background:var(--panel2)}
+.rl .go{display:none;margin-top:8px}
+.rl.sel .go{display:block}
+.rd-scene{color:var(--accent);font-weight:700;margin:1.4em 0 .5em;font-size:.9em;text-transform:uppercase;letter-spacing:.05em}
+.rd-cue{color:var(--muted);font-size:.85em;margin:0 0 6px 8px}
 </style>
 </head>
 <body>
@@ -102,6 +109,7 @@ select{font:inherit;padding:12px;border-radius:12px;background:var(--panel2);col
   <button class="primary" id="b-run-start" style="min-height:80px;font-size:1.15em">Run from the beginning</button>
   <button id="b-run-cont">Carry on from where I stopped</button>
   <button id="b-revise" style="min-height:70px">Focused revision <span class="pill" id="weakcount"></span></button>
+  <button id="b-read">Read the script</button>
   <div class="row"><button id="b-progress">Scenes and progress</button><button id="b-settings">Settings</button></div>
 </div></section>
 
@@ -155,6 +163,14 @@ select{font:inherit;padding:12px;border-radius:12px;background:var(--panel2);col
     <button class="primary" id="d-next">Next</button>
     <button class="ghost" id="d-misheard">It misheard me</button>
   </div>
+</div></section>
+
+<!-- READ -->
+<section id="v-read" class="view"><div class="wrap">
+  <div class="topbar"><button id="rd-back">Back</button><div class="title">Script</div>
+    <select id="rd-jump" aria-label="Jump to scene" style="max-width:45%;font-size:.8em;padding:10px"></select></div>
+  <p class="muted small">Your lines are in white; lines you've found tricky are marked in red. Tap one of your lines to run from there.</p>
+  <div id="rd-list"></div>
 </div></section>
 
 <!-- PROGRESS -->
@@ -616,6 +632,35 @@ function endDrill(finished){
   goHome();
 }
 $('d-exit').onclick=()=>endDrill(false);
+
+/* ---------- READ ---------- */
+function renderRead(){
+  let html='',opts='';
+  SCRIPT.scenes.forEach((sc,si)=>{
+    html+='<div class="rd-scene" id="rd-s'+si+'">'+esc(sc.id+' '+sc.title)+(sc.pre?' (pre-recorded)':'')+'</div>';
+    opts+='<option value="'+si+'">'+esc(sc.id+' '+sc.title)+'</option>';
+    let ui=0;
+    for(const it of sc.items){
+      if(it.cue){html+='<div class="rd-cue"><b>'+esc(it.cue)+':</b> '+esc(it.t)+'</div>';continue}
+      const u=UNITS.find(x=>x.id===String(it.u));
+      if(!u){html+='<div class="rd-cue"><b>You (pre-recorded):</b> '+esc(it.t)+'</div>';continue}
+      const s=STATS[u.id],tr=isWeak(u);
+      html+='<div class="rl'+(tr?' tricky':'')+'" role="button" tabindex="0" data-u="'+u.idx+'">'+esc(u.text)+
+        (tr?' <span class="pill bad">'+(s.m+s.p)+'</span>':'')+
+        '<button class="primary go" data-go="'+u.idx+'">Run from here</button></div>';
+    }
+  });
+  $('rd-list').innerHTML=html;$('rd-jump').innerHTML='<option value="">Jump to scene</option>'+opts;
+  $('rd-list').onclick=e=>{
+    const g=e.target.closest('[data-go]');if(g){startRun(+g.dataset.go);return}
+    const r=e.target.closest('.rl');if(!r)return;
+    const was=r.classList.contains('sel');$('rd-list').querySelectorAll('.rl.sel').forEach(x=>x.classList.remove('sel'));
+    if(!was)r.classList.add('sel');
+  };
+}
+$('rd-jump').onchange=e=>{const v=e.target.value;if(v!==''){const el=$('rd-s'+v);if(el)el.scrollIntoView({block:'start'})}e.target.value=''};
+$('b-read').onclick=()=>{renderRead();show('read')};
+$('rd-back').onclick=goHome;
 
 /* ---------- PROGRESS ---------- */
 function renderProgress(){
