@@ -31,6 +31,7 @@ button:focus-visible,select:focus-visible{outline:3px solid var(--accent);outlin
 #box{position:absolute;inset:0;overflow-y:auto;background:var(--panel);border-radius:16px;padding:0 18px;font-size:var(--fs);line-height:1.55}
 #box::before{content:'';display:block;height:30%}
 #box::after{content:'';display:block;height:68%}
+#box.editing{outline:3px solid var(--accent);outline-offset:-3px}
 #reading{position:absolute;left:0;right:0;height:0;border-top:2px dashed rgba(242,193,78,.35);pointer-events:none;z-index:2}
 .sc{color:var(--accent);font-weight:700;font-size:.6em;letter-spacing:.05em;text-transform:uppercase;margin:1.1em 0 .8em;cursor:pointer}
 .cue{color:var(--muted);font-size:.72em;margin:0 0 .9em;cursor:pointer}
@@ -68,7 +69,7 @@ button:focus-visible,select:focus-visible{outline:3px solid var(--accent);outlin
   <div class="opts">
     <label><input type="checkbox" id="follow" checked> Follow their screen</label>
     <label><input type="checkbox" id="push"> My scrolling moves their screen</label>
-    <span>Tap a word to <span class="seg" role="group" aria-label="Tap a word to"><button id="mjump" aria-pressed="true">jump</button><button id="medit" aria-pressed="false">edit</button></span></span>
+    <span class="seg" role="group" aria-label="Mode"><button id="mjump" aria-pressed="true">Perform</button><button id="medit" aria-pressed="false">Edit script</button></span>
     <span>My view <button id="vminus" aria-label="Smaller text on my screen" style="min-height:32px;padding:2px 10px">-</button> <button id="vplus" aria-label="Bigger text on my screen" style="min-height:32px;padding:2px 10px">+</button></span>
   </div>
   <div id="wrapbox"><div id="box" tabindex="0" aria-label="Script"><div class="msg" id="placeholder">Waiting for the phone...</div></div><div id="reading" aria-hidden="true"></div></div>
@@ -224,7 +225,7 @@ $('fplus').onclick=()=>send({type:'font',delta:0.1});
 $('vminus').onclick=()=>{viewFs=Math.max(12,viewFs-2);localStorage.setItem('remote.fs',viewFs);document.documentElement.style.setProperty('--fs',viewFs+'px')};
 $('vplus').onclick=()=>{viewFs=Math.min(48,viewFs+2);localStorage.setItem('remote.fs',viewFs);document.documentElement.style.setProperty('--fs',viewFs+'px')};
 $('jump').onchange=e=>{const v=e.target.value;if(v!==''){send({type:'jump',ref:[+v,0,0]})}e.target.value=''};
-function setMode(m){mode=m;$('mjump').setAttribute('aria-pressed',m==='jump');$('medit').setAttribute('aria-pressed',m==='edit')}
+function setMode(m){mode=m;$('mjump').setAttribute('aria-pressed',m==='jump');$('medit').setAttribute('aria-pressed',m==='edit');$('box').classList.toggle('editing',m==='edit');if(m==='edit')toast('Edit mode: tap a word or line to skip it or change it',3000)}
 $('mjump').onclick=()=>setMode('jump');$('medit').onclick=()=>setMode('edit');
 document.addEventListener('keydown',e=>{
   const ae=document.activeElement;
@@ -234,14 +235,8 @@ document.addEventListener('keydown',e=>{
   else if(e.key===' '){send({type:'pause',value:!STATE.paused});e.preventDefault()}
 });
 
-/* tap = jump or edit; press and hold = edit */
-let holdT=0,held=false;
-$('box').addEventListener('pointerdown',e=>{held=false;const t=e.target.closest('[data-si]');if(!t)return;clearTimeout(holdT);holdT=setTimeout(()=>{held=true;openEdit(t)},550)});
-['pointerup','pointercancel','pointerleave'].forEach(n=>$('box').addEventListener(n,()=>clearTimeout(holdT)));
-$('box').addEventListener('scroll',()=>clearTimeout(holdT),{passive:true});
-$('box').addEventListener('contextmenu',e=>{if(e.target.closest('[data-si]'))e.preventDefault()});
+/* Perform mode: a tap moves them there, scrolling just scrolls. Edit mode: a tap opens the edit options. */
 $('box').addEventListener('click',e=>{
-  if(held){held=false;return}
   const t=e.target.closest('[data-si]');if(!t)return;
   if(mode==='edit'){openEdit(t);return}
   if(t.classList.contains('w'))send({type:'jump',ref:[+t.dataset.si,+t.dataset.ii,+t.dataset.wi]});
