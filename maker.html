@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14121a">
+<title>Script maker</title>
+<link rel="icon" href="icon.svg">
+<style>
+:root{--bg:#14121a;--panel:#1f1c28;--panel2:#2a2636;--text:#f4f1ea;--muted:#a9a3b8;--accent:#f2c14e;--ok:#6fd08c;--bad:#ff7a7a;--line:#3a3548;--blue:#7fb2ff}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:18px;line-height:1.45}
+button,select,input,textarea{font:inherit;color:inherit}
+button{border:0;border-radius:14px;padding:12px 16px;background:var(--panel2);cursor:pointer;min-height:48px}
+button.primary{background:var(--accent);color:#1b1608;font-weight:700}
+button:focus-visible,[contenteditable]:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.wrap{max-width:820px;margin:0 auto;padding:16px 14px 120px}
+h1{font-size:1.4em;margin:.2em 0}
+h2{font-size:1.05em;margin:1.2em 0 .4em}
+.muted{color:var(--muted)}.small{font-size:.8em}
+.card{background:var(--panel);border-radius:16px;padding:14px;margin:10px 0}
+.stack{display:flex;flex-direction:column;gap:10px}
+.rowflex{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.rowflex>button{flex:1 1 150px}
+input[type=text],select,textarea{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px;width:100%}
+textarea{min-height:120px;font-size:.85em}
+label.lab{display:flex;flex-direction:column;gap:6px}
+#rows{margin-top:8px}
+.r{display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:start;padding:8px 6px;border-bottom:1px solid var(--line)}
+.r .chip{min-height:38px;padding:6px 10px;font-size:.75em;border-radius:999px;min-width:84px}
+.r.me .chip{background:#3a3214;color:var(--accent)}
+.r.other .chip{background:#1e2a3d;color:var(--blue)}
+.r.scene .chip{background:#1f4a2c;color:var(--ok)}
+.r.dir .chip{background:var(--panel2);color:var(--muted)}
+.r .body{min-width:0}
+.r .spk{font-size:.75em;font-weight:700;color:var(--blue);display:inline-block;min-width:3em;padding:1px 4px;border-radius:6px}
+.r.me .spk,.r.scene .spk,.r.dir .spk{display:none}
+.r .txt{padding:2px 4px;border-radius:6px;word-wrap:break-word}
+.r.other .txt{color:var(--muted)}
+.r.scene .txt{color:var(--ok);font-weight:700;text-transform:none}
+.r.dir .txt{color:var(--muted);font-style:italic;text-decoration:line-through}
+.r .pre{display:none;font-size:.75em;color:var(--muted);margin-top:4px}
+.r.scene .pre{display:flex;gap:6px;align-items:center}
+.r .more{min-height:38px;padding:4px 12px;background:transparent;border:1px solid var(--line)}
+.menu{position:fixed;inset:auto 0 0 0;background:var(--panel);border-radius:18px 18px 0 0;padding:14px;display:none;z-index:20;box-shadow:0 -8px 30px rgba(0,0,0,.5)}
+.menu.on{display:flex;flex-direction:column;gap:8px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:8px;z-index:10}
+.bar button{flex:1}
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--panel2);padding:12px 18px;border-radius:14px;display:none;z-index:30;max-width:90vw}
+.toast.on{display:block}
+.legend span{display:inline-block;margin-right:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Script maker</h1>
+  <p class="muted small">Turn a script into a file for Lines and Lines Follow. Everything happens on this device; nothing is uploaded.</p>
+
+  <div class="card stack">
+    <label class="lab">Open a script (Word .docx, text .txt, or a Lines .json to edit)
+      <input id="file" type="file" accept=".docx,.txt,.json,application/json,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
+    <details><summary class="muted small">Or paste the text</summary>
+      <div class="stack" style="margin-top:8px">
+        <textarea id="paste" placeholder="Paste the script here. Lines like  DOCTOR: Hello  are picked up as other characters."></textarea>
+        <button id="usepaste">Use pasted text</button>
+      </div></details>
+  </div>
+
+  <div id="editor" style="display:none">
+    <div class="card stack">
+      <label class="lab">Title <input type="text" id="title"></label>
+      <label class="lab">Which lines are yours?
+        <select id="who"></select></label>
+      <div class="muted small">Choosing this marks every line by that speaker as yours and the rest as other characters. You can then change any line by tapping its label.</div>
+      <div class="muted small" id="counts"></div>
+    </div>
+
+    <h2>Check each line</h2>
+    <div class="muted small legend">Tap the label to change it: <span style="color:var(--accent)">You</span><span style="color:var(--blue)">Other</span><span style="color:var(--ok)">Scene</span><span style="margin-right:0">Ignore (stage directions)</span>. Tap any words or names to correct them.</div>
+    <div id="rows"></div>
+    <div class="rowflex" style="margin-top:12px"><button id="addend">Add a line at the end</button><button id="startover">Start again</button></div>
+  </div>
+</div>
+
+<div class="bar" id="bar" style="display:none">
+  <button id="copy">Copy</button>
+  <button class="primary" id="save">Save script file</button>
+</div>
+
+<div class="menu" id="menu" role="dialog" aria-modal="true" aria-label="Line options">
+  <div class="muted small" id="menutext"></div>
+  <button data-a="above">Add a line above</button>
+  <button data-a="below">Add a line below</button>
+  <button data-a="split">Make this the start of a new scene</button>
+  <button data-a="delete" style="background:#5a2330">Delete this line</button>
+  <button data-a="close">Close</button>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="vendor/jszip.min.js"></script>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const TYPES=['me','other','scene','dir'];
+const LABEL={me:'You',other:'Other',scene:'Scene',dir:'Ignore'};
+const NONAME='(lines with no name)';
+let ROWS=[];      // {type, speaker, t, pre, extra}
+let TITLE='My script';
+let ME=NONAME;
+let menuRow=-1;
+
+function toast(m,ms=2500){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('on'),ms)}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function save(){try{localStorage.setItem('maker.draft',JSON.stringify({ROWS,TITLE,ME}))}catch(e){}}
+
+/* ---------- reading files ---------- */
+async function docxParas(buf){
+  const zip=await JSZip.loadAsync(buf);
+  const f=zip.file('word/document.xml');if(!f)throw new Error('not a Word file');
+  const xml=new DOMParser().parseFromString(await f.async('string'),'application/xml');
+  const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const out=[];
+  for(const p of xml.getElementsByTagNameNS(W,'p')){
+    let cur='';
+    const walk=n=>{for(const c of n.childNodes){
+      if(c.namespaceURI===W&&c.localName==='t')cur+=c.textContent;
+      else if(c.namespaceURI===W&&c.localName==='tab')cur+=' ';
+      else if(c.namespaceURI===W&&(c.localName==='br'||c.localName==='cr')){out.push(cur);cur=''}
+      else if(c.namespaceURI===W&&c.localName==='p')continue;
+      else if(c.childNodes&&c.childNodes.length)walk(c);
+    }};
+    walk(p);out.push(cur);
+  }
+  return out;
+}
+
+const SCENE_RE=/^(?:(act|scene)\b\.?\s*)?([0-9]+(?:\.[0-9]+)*|[IVXLC]+)\s*[.:)\-–]?\s+(.*)$/i;
+function isCapsName(t){return t.length<=30&&/[A-Z]/.test(t)&&t===t.toUpperCase()&&!/[.!?,;]$/.test(t)&&t.split(/\s+/).length<=4}
+function parseParas(paras){
+  const rows=[];let cur=null;const names=new Map();
+  const nm=x=>{const k=x.trim().toUpperCase();if(!names.has(k))names.set(k,x.trim());return names.get(k)};
+  const clean=paras.map(s=>s.replace(/\s+/g,' ').trim());
+  for(let i=0;i<clean.length;i++){
+    const t=clean[i];
+    if(!t){cur=null;continue}
+    if(/^\(.*\)$/.test(t)||/^\[.*\]$/.test(t)){rows.push({type:'dir',t});continue}
+    if(/^(act|scene)\b/i.test(t)&&t.length<80){rows.push({type:'scene',t,pre:/pre-?record/i.test(t)});cur=null;continue}
+    if(SCENE_RE.test(t)&&t.length<70&&!/[.!?]$/.test(t)&&/^[0-9IVXLC]/.test(t)&&/\d/.test(t.split(/\s/)[0])){rows.push({type:'scene',t,pre:/pre-?record/i.test(t)});cur=null;continue}
+    const m=t.match(/^([A-Z][A-Za-z0-9 .'’&\-]{0,28}?)\s*[:：]\s*(.*)$/);
+    if(m&&!/^(and|but|the|so|i|if|then|or)$/i.test(m[1])){
+      if(m[2]){rows.push({type:'line',speaker:nm(m[1]),t:m[2]});continue}
+      cur=nm(m[1]);continue;
+    }
+    if(isCapsName(t)){
+      const next=clean.slice(i+1).find(x=>x);
+      if(next&&!isCapsName(next)){cur=nm(t);continue}
+    }
+    rows.push({type:'line',speaker:cur,t});
+  }
+  return rows;
+}
+function fromJson(d){
+  const rows=[];
+  (d.scenes||[]).forEach(sc=>{
+    const extra={};for(const k of Object.keys(sc))if(!['id','title','pre','items'].includes(k))extra[k]=sc[k];
+    rows.push({type:'scene',t:((sc.id||'')+' '+(sc.title||'')).trim(),pre:!!sc.pre,extra});
+    for(const it of sc.items||[]){
+      const ex={};for(const k of Object.keys(it))if(!['cue','t','u'].includes(k))ex[k]=it[k];
+      if(it.cue)rows.push({type:'other',speaker:it.cue,t:it.t||'',extra:ex});
+      else rows.push({type:'me',speaker:'',t:it.t||'',extra:ex});
+    }
+  });
+  return rows;
+}
+function speakers(){
+  const c=new Map();
+  for(const r of ROWS)if(r.type==='me'||r.type==='other'||r.type==='line'){const k=r.speaker||NONAME;c.set(k,(c.get(k)||0)+1)}
+  return [...c.entries()].sort((a,b)=>b[1]-a[1]);
+}
+function applyMe(){
+  for(const r of ROWS){
+    if(r.type!=='me'&&r.type!=='other'&&r.type!=='line')continue;
+    if(r.fromJson)continue;
+    r.type=((r.speaker||NONAME)===ME)?'me':'other';
+  }
+}
+function begin(rows,title,fromJsonFile){
+  ROWS=rows;TITLE=title||'My script';
+  if(fromJsonFile){ROWS.forEach(r=>{if(r.type==='me'||r.type==='other')r.fromJson=true});ME=NONAME}
+  else{
+    const sp=speakers();
+    const none=sp.find(s=>s[0]===NONAME);
+    ME=none&&none[1]>=(sp[0]?sp[0][1]:0)/3?NONAME:(sp[0]?sp[0][0]:NONAME);
+    applyMe();
+  }
+  $('editor').style.display='';$('bar').style.display='';
+  render();save();
+  toast(ROWS.length+' lines read. Check them below.');
+}
+
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const title=f.name.replace(/\.[^.]+$/,'');
+  try{
+    if(/\.docx$/i.test(f.name)){begin(parseParas(await docxParas(await f.arrayBuffer())),title)}
+    else{
+      const txt=await f.text();
+      if(/\.json$/i.test(f.name)||txt.trim().startsWith('{')){const d=JSON.parse(txt);begin(fromJson(d),d.title||title,true)}
+      else begin(parseParas(txt.split(/\r?\n/)),title);
+    }
+  }catch(err){toast("Couldn't read that file: "+err.message,4000)}
+  e.target.value='';
+};
+$('usepaste').onclick=()=>{const t=$('paste').value;if(!t.trim())return;begin(parseParas(t.split(/\r?\n/)),'My script')};
+
+/* ---------- editor ---------- */
+function render(){
+  $('title').value=TITLE;
+  const sp=speakers();
+  const opts=sp.map(([k,n])=>`<option value="${esc(k)}"${k===ME?' selected':''}>${esc(k)} (${n})</option>`);
+  if(!sp.some(s=>s[0]===ME))opts.unshift(`<option value="${esc(ME)}" selected>${esc(ME)}</option>`);
+  $('who').innerHTML=opts.join('');
+  let h='';
+  ROWS.forEach((r,i)=>{
+    const ty=r.type==='line'?'other':r.type;
+    h+=`<div class="r ${ty}" data-i="${i}">
+      <button class="chip" data-chip="${i}" aria-label="Line ${i+1} is ${LABEL[ty]}. Tap to change">${LABEL[ty]}</button>
+      <div class="body"><span class="spk" contenteditable="true" data-spk="${i}" aria-label="Speaker">${esc(r.speaker||'')}</span>
+        <div class="txt" contenteditable="true" data-txt="${i}" aria-label="Text">${esc(r.t)}</div>
+        <label class="pre"><input type="checkbox" data-pre="${i}" ${r.pre?'checked':''}> Pre-recorded scene</label></div>
+      <button class="more" data-more="${i}" aria-label="More options for line ${i+1}">⋯</button></div>`;
+  });
+  $('rows').innerHTML=h;
+  counts();
+}
+function counts(){
+  const n=t=>ROWS.filter(r=>r.type===t).length;
+  $('counts').textContent=`${n('me')} lines are yours, ${n('other')} belong to others, ${n('scene')} scenes, ${n('dir')} ignored.`;
+}
+$('rows').addEventListener('click',e=>{
+  const c=e.target.closest('[data-chip]');
+  if(c){const i=+c.dataset.chip,r=ROWS[i];const cur=r.type==='line'?'other':r.type;r.type=TYPES[(TYPES.indexOf(cur)+1)%TYPES.length];
+    const row=c.closest('.r');row.className='r '+r.type;c.textContent=LABEL[r.type];c.setAttribute('aria-label',`Line ${i+1} is ${LABEL[r.type]}. Tap to change`);counts();save();return}
+  const m=e.target.closest('[data-more]');
+  if(m){menuRow=+m.dataset.more;$('menutext').textContent='"'+ROWS[menuRow].t.slice(0,60)+(ROWS[menuRow].t.length>60?'...':'')+'"';$('menu').classList.add('on');}
+});
+$('rows').addEventListener('input',e=>{
+  const t=e.target;
+  if(t.dataset.txt!=null){ROWS[+t.dataset.txt].t=t.textContent.replace(/\s+/g,' ').trim();save()}
+  else if(t.dataset.spk!=null){ROWS[+t.dataset.spk].speaker=t.textContent.trim();save()}
+});
+$('rows').addEventListener('change',e=>{const t=e.target;if(t.dataset.pre!=null){ROWS[+t.dataset.pre].pre=t.checked;save()}});
+$('menu').addEventListener('click',e=>{
+  const a=e.target.closest('[data-a]');if(!a)return;const i=menuRow;
+  if(a.dataset.a==='above'){ROWS.splice(i,0,{type:'me',speaker:'',t:'New line'});render()}
+  if(a.dataset.a==='below'){ROWS.splice(i+1,0,{type:'me',speaker:'',t:'New line'});render()}
+  if(a.dataset.a==='split'){ROWS.splice(i,0,{type:'scene',t:'New scene'});render()}
+  if(a.dataset.a==='delete'){ROWS.splice(i,1);render()}
+  $('menu').classList.remove('on');save();
+});
+$('who').onchange=e=>{ME=e.target.value;ROWS.forEach(r=>delete r.fromJson);applyMe();render();save()};
+$('title').oninput=e=>{TITLE=e.target.value;save()};
+$('addend').onclick=()=>{ROWS.push({type:'me',speaker:'',t:'New line'});render();save();window.scrollTo(0,document.body.scrollHeight)};
+$('startover').onclick=()=>{if(confirm('Clear this script and start again?')){ROWS=[];localStorage.removeItem('maker.draft');$('editor').style.display='none';$('bar').style.display='none'}};
+
+/* ---------- export ---------- */
+function build(){
+  const scenes=[];let sc=null,u=0,auto=0;
+  const newScene=(t,pre,extra)=>{
+    const m=(t||'').match(SCENE_RE);
+    let id,title;
+    if(m&&m[2]){id=m[2];title=m[3]}else{id=String(++auto);title=t||''}
+    title=title.replace(/\(?\s*pre-?recorded\s*\)?/i,'').trim();
+    sc=Object.assign({},extra||{},{id,title,pre:!!pre,items:[]});scenes.push(sc);
+  };
+  for(const r of ROWS){
+    if(r.type==='dir')continue;
+    if(r.type==='scene'){auto=Math.max(auto,0);newScene(r.t,r.pre,r.extra);continue}
+    if(!r.t.trim())continue;
+    if(!sc)newScene('1 Script',false);
+    if(r.type==='me')sc.items.push(Object.assign({},r.extra||{},{u:++u,t:r.t}));
+    else{const it=Object.assign({},r.extra||{},{cue:r.speaker||'Other',t:r.t});delete it.skipWords;sc.items.push(it)}
+  }
+  return {title:TITLE||'My script',scenes:scenes.filter(s=>s.items.length)};
+}
+$('save').onclick=()=>{
+  const d=build();const n=d.scenes.reduce((a,s)=>a+s.items.filter(i=>!i.cue).length,0);
+  if(!n){toast('None of the lines are marked as yours yet.');return}
+  const blob=new Blob([JSON.stringify(d,null,1)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=(d.title||'script').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-').toLowerCase()+'.json';
+  document.body.appendChild(a);a.click();a.remove();
+  toast(`Saved: ${n} of your lines in ${d.scenes.length} scenes. Load it in Lines Follow.`,4000);
+};
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(build()));toast('Copied')}catch(e){toast("Couldn't copy")}};
+
+/* ---------- boot ---------- */
+try{const d=JSON.parse(localStorage.getItem('maker.draft')||'null');if(d&&d.ROWS&&d.ROWS.length){ROWS=d.ROWS;TITLE=d.TITLE;ME=d.ME;$('editor').style.display='';$('bar').style.display='';render()}}catch(e){}
+window.__maker={parseParas,fromJson,build,begin,rows:()=>ROWS};
+</script>
+</body>
+</html>

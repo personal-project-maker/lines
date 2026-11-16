@@ -8,16 +8,53 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-class Item(val cue: String?, val t: String, val u: String?)
-class Scene(val id: String, val title: String, val pre: Boolean, val items: List<Item>)
-class Script(val title: String, val scenes: List<Scene>)
+class Item(val cue: String?, var t: String, val u: String?) {
+    var skip = false
+    val skipWords = HashSet<Int>()
+    var orig: String? = null
+    var extra: JSONObject? = null   // any other fields, kept as they were
 
-class DispWord(val w: String, val from: Int, val to: Int) {
+    fun words(): List<String> = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
+}
+class Scene(val id: String, val title: String, val pre: Boolean, val items: MutableList<Item>) {
+    var skip = false
+    var extra: JSONObject? = null
+}
+class Script(val title: String, val scenes: List<Scene>) {
+    fun toJson(): String {
+        val o = JSONObject()
+        o.put("title", title)
+        val arr = JSONArray()
+        for (sc in scenes) {
+            val so = copyOf(sc.extra)
+            so.put("id", sc.id); so.put("title", sc.title); so.put("pre", sc.pre)
+            if (sc.skip) so.put("skip", true) else so.remove("skip")
+            val items = JSONArray()
+            for (it in sc.items) {
+                val io = copyOf(it.extra)
+                if (it.cue != null) io.put("cue", it.cue) else io.put("u", it.u?.toIntOrNull() ?: it.u)
+                io.put("t", it.t)
+                if (it.skip) io.put("skip", true) else io.remove("skip")
+                if (it.skipWords.isNotEmpty()) io.put("skipWords", JSONArray(it.skipWords.sorted())) else io.remove("skipWords")
+                if (it.orig != null) io.put("orig", it.orig) else io.remove("orig")
+                items.put(io)
+            }
+            so.put("items", items)
+            arr.put(so)
+        }
+        o.put("scenes", arr)
+        return o.toString()
+    }
+    private fun copyOf(x: JSONObject?): JSONObject = if (x == null) JSONObject() else JSONObject(x.toString())
+}
+
+/** A word on screen. si/ii/wi = scene, item and word index in the script. from == to means it isn't followed. */
+class DispWord(val w: String, val from: Int, val to: Int, val si: Int, val ii: Int, val wi: Int, val skipped: Boolean) {
     var charStart = 0
     var charEnd = 0
 }
 
-class LineUnit(val id: String, val sceneIdx: Int, val text: String, val idx: Int) {
+class LineUnit(val id: String, val sceneIdx: Int, val itemIdx: Int, val text: String, val idx: Int) {
     var start = 0
     var end = 0
     val disp = ArrayList<DispWord>()
@@ -133,17 +170,30 @@ object ScriptLoader {
                 val it = itemsArr.optJSONObject(k) ?: continue
                 val t = it.optString("t", "")
                 val cue = it.optString("cue", "")
-                if (cue.isNotEmpty()) items.add(Item(cue, t, null))
-                else items.add(Item(null, t, if (it.has("u")) it.get("u").toString() else "auto${++auto}"))
+                val item = if (cue.isNotEmpty()) Item(cue, t, null)
+                    else Item(null, t, if (it.has("u")) it.get("u").toString() else "auto${++auto}")
+                item.skip = it.optBoolean("skip", false)
+                val sw = it.optJSONArray("skipWords")
+                if (sw != null) for (k in 0 until sw.length()) item.skipWords.add(sw.optInt(k))
+                if (it.has("orig")) item.orig = it.optString("orig")
+                val extra = JSONObject(it.toString())
+                for (key in listOf("cue", "t", "u", "skip", "skipWords", "orig")) extra.remove(key)
+                if (extra.length() > 0) item.extra = extra
+                items.add(item)
             }
-            scenes.add(Scene(sc.optString("id", (i + 1).toString()), sc.optString("title", ""), sc.optBoolean("pre", false), items))
+            val scene = Scene(sc.optString("id", (i + 1).toString()), sc.optString("title", ""), sc.optBoolean("pre", false), items)
+            scene.skip = sc.optBoolean("skip", false)
+            val sx = JSONObject(sc.toString())
+            for (key in listOf("id", "title", "pre", "items", "skip")) sx.remove(key)
+            if (sx.length() > 0) scene.extra = sx
+            scenes.add(scene)
         }
         return Script(o.optString("title", "My script"), scenes)
     }
 
     private fun fromLines(lines: List<String>, title: String): Script {
         var n = 0
-        val items = lines.map { it.trim() }.filter { it.isNotEmpty() }.map { Item(null, it, (++n).toString()) }
+        val items = lines.map { it.trim() }.filter { it.isNotEmpty() }.map { Item(null, it, (++n).toString()) }.toMutableList()
         return Script(title, listOf(Scene("1", "Script", false, items)))
     }
 
@@ -177,26 +227,46 @@ class FollowModel(val script: Script) {
 
     init {
         script.scenes.forEachIndexed { si, sc ->
-            for (it in sc.items) {
-                if (it.cue != null) continue
-                val u = LineUnit(it.u ?: "", si, it.t, units.size)
-                u.start = E.size
-                for (w in it.t.split(Regex("\\s+")).filter { s -> s.isNotEmpty() }) {
-                    val tk = Words.toks(w)
-                    u.disp.add(DispWord(w, E.size, E.size + tk.size))
-                    for (t in tk) { E.add(t); eUnit.add(u.idx) }
+            sc.items.forEachIndexed { ii, it ->
+                if (it.cue == null) {
+                    val u = LineUnit(it.u ?: "", si, ii, it.t, units.size)
+                    u.start = E.size
+                    it.words().forEachIndexed { wi, w ->
+                        val skipped = sc.skip || it.skip || wi in it.skipWords
+                        val tk = if (skipped) emptyList() else Words.toks(w)
+                        u.disp.add(DispWord(w, E.size, E.size + tk.size, si, ii, wi, skipped))
+                        for (t in tk) { E.add(t); eUnit.add(u.idx) }
+                    }
+                    u.end = E.size
+                    units.add(u)
                 }
-                u.end = E.size
-                units.add(u)
             }
         }
+    }
+
+    /** First followed word at or after this word (scene, item, word), as a cursor position. */
+    fun posFor(si: Int, ii: Int, wi: Int): Int {
+        for (u in units) {
+            if (u.sceneIdx < si || (u.sceneIdx == si && u.itemIdx < ii)) continue
+            for (d in u.disp) {
+                if (u.sceneIdx == si && u.itemIdx == ii && d.wi < wi) continue
+                if (d.from < d.to) return d.from
+            }
+        }
+        return E.size
+    }
+
+    /** The word the cursor is on, as (scene, item, word), or null at the end. */
+    fun refFor(p: Int): Triple<Int, Int, Int>? {
+        for (u in units) for (d in u.disp) if (d.from < d.to && d.to > p) return Triple(d.si, d.ii, d.wi)
+        return null
     }
 
     fun unitAt(p: Int): LineUnit? = if (p < 0 || p >= E.size) null else units[eUnit[p]]
 
     fun grammarJson(): String {
         val set = LinkedHashSet<String>()
-        for (u in units) set.addAll(Words.vocab(u.text))
+        for (u in units) for (d in u.disp) if (!d.skipped) set.addAll(Words.vocab(d.w))
         val arr = JSONArray()
         for (w in set) arr.put(w)
         arr.put("[unk]")

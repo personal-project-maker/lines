@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14121a">
+<meta name="referrer" content="no-referrer">
+<title>Lines Follow: remote</title>
+<link rel="icon" href="icon.svg">
+<style>
+:root{--bg:#14121a;--panel:#1f1c28;--panel2:#2a2636;--text:#f4f1ea;--muted:#a9a3b8;--dim:#6f6984;--skip:#55506a;--accent:#f2c14e;--ok:#6fd08c;--bad:#ff7a7a;--line:#3a3548;--fs:22px}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:16px}
+button,select{font:inherit;color:inherit;border:0;border-radius:12px;background:var(--panel2);cursor:pointer;min-height:44px;padding:8px 12px}
+button.primary{background:var(--accent);color:#1b1608;font-weight:700}
+button:focus-visible,select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.app{display:flex;flex-direction:column;height:100dvh;max-width:900px;margin:0 auto;padding:8px 10px}
+.top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.top .title{flex:1;font-weight:700;min-width:120px}
+.status{display:flex;align-items:center;gap:8px;font-size:.85em;color:var(--muted);margin:6px 0}
+.dot{width:11px;height:11px;border-radius:50%;background:var(--muted);flex:none}
+.dot.live{background:var(--ok)}
+.dot.bad{background:var(--bad)}
+.opts{display:flex;gap:6px 14px;flex-wrap:wrap;font-size:.85em;color:var(--muted);align-items:center;margin-bottom:6px}
+.opts label{display:flex;gap:6px;align-items:center}
+.opts input{width:20px;height:20px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.seg button{border-radius:0;min-height:36px;padding:4px 12px;background:transparent}
+.seg button[aria-pressed=true]{background:var(--panel2);color:var(--accent);font-weight:700}
+#wrapbox{position:relative;flex:1;min-height:0}
+#box{position:absolute;inset:0;overflow-y:auto;background:var(--panel);border-radius:16px;padding:0 18px;font-size:var(--fs);line-height:1.55}
+#box::before{content:'';display:block;height:30%}
+#box::after{content:'';display:block;height:68%}
+#reading{position:absolute;left:0;right:0;height:0;border-top:2px dashed rgba(242,193,78,.35);pointer-events:none;z-index:2}
+.sc{color:var(--accent);font-weight:700;font-size:.6em;letter-spacing:.05em;text-transform:uppercase;margin:1.1em 0 .8em;cursor:pointer}
+.cue{color:var(--muted);font-size:.72em;margin:0 0 .9em;cursor:pointer}
+.cue b{font-weight:700}
+.ln{margin:0 0 .9em}
+.w{cursor:pointer;border-radius:4px}
+.w.said{color:var(--dim)}
+.w.now{color:var(--accent);text-decoration:underline;text-decoration-thickness:3px;text-underline-offset:4px}
+.skip,.skip .w{color:var(--skip)!important;text-decoration:line-through!important}
+.sc.skip{text-decoration:line-through}
+.bottom{display:flex;gap:6px;margin-top:8px}
+.bottom button{flex:1}
+.sheet{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-radius:18px 18px 0 0;padding:14px;display:none;flex-direction:column;gap:8px;z-index:20;box-shadow:0 -8px 30px rgba(0,0,0,.6);max-width:900px;margin:0 auto}
+.sheet.on{display:flex}
+.sheet .what{color:var(--muted);font-size:.9em}
+.sheet textarea{font:inherit;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:110px}
+.cover{position:fixed;inset:0;background:rgba(10,8,14,.5);display:none;z-index:15}
+.cover.on{display:block}
+.msg{padding:30px 20px;color:var(--muted);text-align:center}
+.toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:var(--panel2);padding:10px 16px;border-radius:12px;display:none;z-index:30}
+.toast.on{display:block}
+.sr{position:absolute;left:-9999px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="title" id="title">Lines Follow</div>
+    <span class="muted" style="font-size:.8em;color:var(--muted)">Their text</span>
+    <button id="fminus" aria-label="Make their text smaller">A-</button>
+    <button id="fplus" aria-label="Make their text bigger">A+</button>
+    <select id="jump" aria-label="Jump to scene" style="max-width:40%"></select>
+  </div>
+  <div class="status" aria-live="polite"><span class="dot" id="cdot"></span><span id="conn">Connecting...</span><span>·</span><span class="dot" id="pdot"></span><span id="pstatus"></span></div>
+  <div class="opts">
+    <label><input type="checkbox" id="follow" checked> Follow their screen</label>
+    <label><input type="checkbox" id="push"> My scrolling moves their screen</label>
+    <span>Tap a word to <span class="seg" role="group" aria-label="Tap a word to"><button id="mjump" aria-pressed="true">jump</button><button id="medit" aria-pressed="false">edit</button></span></span>
+    <span>My view <button id="vminus" aria-label="Smaller text on my screen" style="min-height:32px;padding:2px 10px">-</button> <button id="vplus" aria-label="Bigger text on my screen" style="min-height:32px;padding:2px 10px">+</button></span>
+  </div>
+  <div id="wrapbox"><div id="box" tabindex="0" aria-label="Script"><div class="msg" id="placeholder">Waiting for the phone...</div></div><div id="reading" aria-hidden="true"></div></div>
+  <div class="bottom">
+    <button id="back">Back a line</button>
+    <button id="pause" class="primary">Pause</button>
+    <button id="fwd">Forward a line</button>
+  </div>
+</div>
+<div class="cover" id="cover"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="what"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m,ms=2200){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('on'),ms)}
+let SCRIPT=null, STATE={}, mode='jump', wordEls=[], order=new Map(), lastNow=-1;
+let ignoreViewUntil=0, programmatic=0;
+let viewFs=+(localStorage.getItem('remote.fs')||22);
+document.documentElement.style.setProperty('--fs',viewFs+'px');
+
+/* ---------------- transport ---------------- */
+const hash=new URLSearchParams(location.hash.slice(1));
+const ROOM=hash.get('r'), KEY=hash.get('k');
+let send=()=>{};
+function setConn(t,cls){$('conn').textContent=t;$('cdot').className='dot '+(cls||'')}
+
+function b64urlToBytes(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}
+function bytesToB64(b){let s='';for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode.apply(null,b.subarray(i,i+0x8000));return btoa(s)}
+
+async function startOnline(){
+  if(!crypto.subtle){setConn('This page needs to be opened over https','bad');return}
+  const key=await crypto.subtle.importKey('raw',b64urlToBytes(KEY),{name:'AES-GCM'},false,['encrypt','decrypt']);
+  const enc=async obj=>{const iv=crypto.getRandomValues(new Uint8Array(12));
+    const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(obj))));
+    const all=new Uint8Array(12+ct.length);all.set(iv);all.set(ct,12);return bytesToB64(all)};
+  const dec=async payload=>{const raw=Uint8Array.from(atob(new TextDecoder().decode(payload)),c=>c.charCodeAt(0));
+    const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.slice(0,12)},key,raw.slice(12));return JSON.parse(new TextDecoder().decode(pt))};
+  await new Promise((res,rej)=>{const s=document.createElement('script');s.src='vendor/mqtt.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s)});
+  const broker=hash.get('b')||'wss://broker.hivemq.com:8884/mqtt';
+  const c=mqtt.connect(broker,{clientId:'lfw-'+Math.random().toString(36).slice(2,10),clean:true,reconnectPeriod:2000,connectTimeout:15000,keepalive:30});
+  const up='linesfollow/'+ROOM+'/up', down='linesfollow/'+ROOM+'/down';
+  send=async obj=>{if(c.connected)c.publish(down,await enc(obj))};
+  c.on('connect',()=>{setConn('Connected online','live');c.subscribe(up,()=>send({type:'hello'}))});
+  c.on('reconnect',()=>setConn('Reconnecting...'));
+  c.on('offline',()=>setConn('Offline: check the internet connection','bad'));
+  c.on('message',async(t,payload)=>{try{handle(await dec(payload))}catch(e){/* not for us, or wrong key */}});
+  setTimeout(()=>{if(!SCRIPT&&c.connected)$('placeholder').textContent="Connected, but the phone isn't answering. Check that the online link is turned on in Lines Follow, and that this is the newest link."},12000);
+}
+function startLocal(){
+  const es=new EventSource('events');
+  es.onopen=()=>setConn('Connected over Wi-Fi','live');
+  es.onerror=()=>setConn('Lost the phone. Reconnecting...','bad');
+  es.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(err){}};
+  send=obj=>fetch('cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)}).catch(()=>toast("Couldn't reach the phone"));
+}
+if(ROOM&&KEY)startOnline().catch(e=>setConn("Couldn't connect: "+e.message,'bad'));
+else if(location.protocol==='http:'&&location.port)startLocal();
+else{setConn('No link','bad');$('placeholder').textContent='Open this page from the link sent by Lines Follow (Menu, then Share my screen).'}
+
+/* ---------------- messages from the phone ---------------- */
+function handle(m){
+  if(m.type==='script'){SCRIPT=m.script;render();applyState(true)}
+  else if(m.type==='state'){STATE=m;applyState(false)}
+}
+
+function words(t){return String(t||'').split(/\s+/).filter(Boolean)}
+const key=(si,ii,wi)=>si+'.'+ii+'.'+wi;
+
+function render(){
+  const box=$('box');
+  if(!SCRIPT){box.innerHTML='<div class="msg">No script loaded on the phone yet.</div>';return}
+  let h='',opts='<option value="">Jump to scene</option>';
+  SCRIPT.scenes.forEach((sc,si)=>{
+    const head=((sc.id||'')+' '+(sc.title||'')).trim()+(sc.pre?' (pre-recorded)':'')+(sc.skip?' (skipped)':'');
+    h+=`<div class="sc${sc.skip?' skip':''}" data-si="${si}" data-ii="-1">${esc(head)}</div>`;
+    opts+=`<option value="${si}">${esc(((sc.id||'')+' '+(sc.title||'')).trim())}</option>`;
+    (sc.items||[]).forEach((it,ii)=>{
+      if(it.cue){h+=`<div class="cue${sc.skip||it.skip?' skip':''}" data-si="${si}" data-ii="${ii}"><b>${esc(it.cue)}:</b> ${esc(it.t)}</div>`;return}
+      const sk=new Set(it.skipWords||[]);
+      h+=`<p class="ln${sc.skip||it.skip?' skip':''}" data-si="${si}" data-ii="${ii}">`;
+      words(it.t).forEach((w,wi)=>{h+=`<span class="w${sk.has(wi)?' skip':''}" data-si="${si}" data-ii="${ii}" data-wi="${wi}">${esc(w)}</span> `});
+      h+='</p>';
+    });
+  });
+  const keepTop=box.scrollTop;
+  box.innerHTML=h;$('jump').innerHTML=opts;
+  wordEls=[...box.querySelectorAll('.w')];order=new Map();
+  wordEls.forEach((el,i)=>order.set(key(el.dataset.si,el.dataset.ii,el.dataset.wi),i));
+  lastNow=-1;programmatic=Date.now();box.scrollTop=keepTop;
+}
+function applyState(force){
+  const s=STATE;
+  $('title').textContent=s.title||(SCRIPT&&SCRIPT.title)||'Lines Follow';
+  $('pstatus').textContent=s.status||'';
+  $('pdot').className='dot'+(s.live?' live':'');
+  $('pause').textContent=s.paused?'Resume':'Pause';
+  if(!wordEls.length)return;
+  const ni=s.now?order.get(key(...s.now)):wordEls.length;
+  const n=ni==null?wordEls.length:ni;
+  if(n!==lastNow||force){
+    wordEls.forEach((el,i)=>{el.classList.toggle('said',i<n);el.classList.toggle('now',i===n)});
+    lastNow=n;
+  }
+  if($('follow').checked&&s.view&&Date.now()>ignoreViewUntil)scrollToRef(s.view,!force);
+}
+function elFor(ref){
+  const [si,ii,wi]=ref;const box=$('box');
+  return (wi>=0&&box.querySelector(`.w[data-si="${si}"][data-ii="${ii}"][data-wi="${wi}"]`))||box.querySelector(`[data-si="${si}"][data-ii="${ii}"]:not(.w)`)||box.querySelector(`.sc[data-si="${si}"]`);
+}
+function scrollToRef(ref,smooth){
+  const el=elFor(ref);if(!el)return;const box=$('box');
+  const y=el.getBoundingClientRect().top-box.getBoundingClientRect().top+box.scrollTop-box.clientHeight*0.3;
+  programmatic=Date.now();
+  box.scrollTo({top:Math.max(0,y),behavior:smooth?'smooth':'auto'});
+}
+function placeReading(){const box=$('box');$('reading').style.top=(box.clientHeight*0.3)+'px'}
+addEventListener('resize',placeReading);placeReading();
+
+/* what is at the reading line on my screen */
+function myViewRef(){
+  const box=$('box'),line=box.getBoundingClientRect().top+box.clientHeight*0.3;
+  let best=null;
+  for(const el of box.querySelectorAll('.sc,.cue,.ln,.w')){
+    const r=el.getBoundingClientRect();
+    if(r.top<=line+4)best=el;else if(!el.classList.contains('w'))break;
+  }
+  if(!best)return null;
+  return [+best.dataset.si,+best.dataset.ii,best.dataset.wi!=null?+best.dataset.wi:-1];
+}
+// Only scrolling done by a person here (finger, wheel, keys, scrollbar) is sent to the phone.
+let pushT=0,userScrollUntil=0;
+const touched=()=>{userScrollUntil=Date.now()+1200};
+['wheel','touchstart','touchmove','pointerdown','keydown'].forEach(n=>$('box').addEventListener(n,touched,{passive:true}));
+$('box').addEventListener('scroll',()=>{
+  if(Date.now()>userScrollUntil)return;        // moved by the phone, not by the person here
+  userScrollUntil=Date.now()+600;
+  ignoreViewUntil=Date.now()+1500;               // don't let the phone's view pull us back mid-scroll
+  if(!$('push').checked)return;
+  clearTimeout(pushT);pushT=setTimeout(()=>{const r=myViewRef();if(r){ignoreViewUntil=Date.now()+1500;send({type:'scroll',ref:r})}},250);
+},{passive:true});
+$('follow').onchange=e=>{if(e.target.checked&&STATE.view)scrollToRef(STATE.view,true)};
+$('push').onchange=e=>{if(e.target.checked){$('follow').checked=true;const r=myViewRef();if(r)send({type:'scroll',ref:r})}};
+
+/* ---------------- controls ---------------- */
+$('back').onclick=()=>send({type:'step',dir:-1});
+$('fwd').onclick=()=>send({type:'step',dir:1});
+$('pause').onclick=()=>send({type:'pause',value:!STATE.paused});
+$('fminus').onclick=()=>send({type:'font',delta:-0.1});
+$('fplus').onclick=()=>send({type:'font',delta:0.1});
+$('vminus').onclick=()=>{viewFs=Math.max(12,viewFs-2);localStorage.setItem('remote.fs',viewFs);document.documentElement.style.setProperty('--fs',viewFs+'px')};
+$('vplus').onclick=()=>{viewFs=Math.min(48,viewFs+2);localStorage.setItem('remote.fs',viewFs);document.documentElement.style.setProperty('--fs',viewFs+'px')};
+$('jump').onchange=e=>{const v=e.target.value;if(v!==''){send({type:'jump',ref:[+v,0,0]})}e.target.value=''};
+function setMode(m){mode=m;$('mjump').setAttribute('aria-pressed',m==='jump');$('medit').setAttribute('aria-pressed',m==='edit')}
+$('mjump').onclick=()=>setMode('jump');$('medit').onclick=()=>setMode('edit');
+document.addEventListener('keydown',e=>{
+  const ae=document.activeElement;
+  if($('sheet').classList.contains('on')||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'||(ae.tagName==='INPUT'&&ae.type==='text'))return;
+  if(e.key==='ArrowRight'||e.key==='PageDown'){send({type:'step',dir:1});e.preventDefault()}
+  else if(e.key==='ArrowLeft'||e.key==='PageUp'){send({type:'step',dir:-1});e.preventDefault()}
+  else if(e.key===' '){send({type:'pause',value:!STATE.paused});e.preventDefault()}
+});
+
+/* tap = jump or edit; press and hold = edit */
+let holdT=0,held=false;
+$('box').addEventListener('pointerdown',e=>{held=false;const t=e.target.closest('[data-si]');if(!t)return;clearTimeout(holdT);holdT=setTimeout(()=>{held=true;openEdit(t)},550)});
+['pointerup','pointercancel','pointerleave'].forEach(n=>$('box').addEventListener(n,()=>clearTimeout(holdT)));
+$('box').addEventListener('scroll',()=>clearTimeout(holdT),{passive:true});
+$('box').addEventListener('contextmenu',e=>{if(e.target.closest('[data-si]'))e.preventDefault()});
+$('box').addEventListener('click',e=>{
+  if(held){held=false;return}
+  const t=e.target.closest('[data-si]');if(!t)return;
+  if(mode==='edit'){openEdit(t);return}
+  if(t.classList.contains('w'))send({type:'jump',ref:[+t.dataset.si,+t.dataset.ii,+t.dataset.wi]});
+  else{const si=+t.dataset.si,ii=+t.dataset.ii;send({type:'jump',ref:[si,Math.max(0,ii),0]})}
+});
+
+/* ---------------- edit sheet ---------------- */
+function closeSheet(){$('sheet').classList.remove('on');$('cover').classList.remove('on')}
+$('cover').onclick=closeSheet;
+function sheet(title,buttons){
+  const s=$('sheet');s.innerHTML=`<div class="what" id="what">${esc(title)}</div>`;
+  for(const [label,fn,cls] of buttons){const b=document.createElement('button');b.textContent=label;if(cls)b.className=cls;b.onclick=()=>{closeSheet();fn()};s.appendChild(b)}
+  const c=document.createElement('button');c.textContent='Cancel';c.onclick=closeSheet;s.appendChild(c);
+  s.classList.add('on');$('cover').classList.add('on');s.querySelector('button').focus();
+}
+const short=s=>s.length>70?s.slice(0,67)+'...':s;
+function openEdit(t){
+  if(!SCRIPT)return;
+  const si=+t.dataset.si,ii=+t.dataset.ii,wi=t.dataset.wi!=null?+t.dataset.wi:-1;
+  const sc=SCRIPT.scenes[si];const btns=[];
+  if(ii>=0){
+    const it=sc.items[ii];
+    if(wi>=0){
+      const w=words(it.t)[wi];const sk=(it.skipWords||[]).includes(wi);
+      btns.push([sk?`Don't skip "${w}"`:`Skip the word "${w}"`,()=>send({type:'edit',op:'skipWord',si,ii,wi,value:!sk})]);
+      btns.push(['Start following from here',()=>send({type:'jump',ref:[si,ii,wi]})]);
+    }
+    btns.push([it.skip?"Don't skip this line":'Skip this line',()=>send({type:'edit',op:'skipItem',si,ii,value:!it.skip})]);
+    btns.push(['Change the wording',()=>wording(si,ii)]);
+    if(it.orig!=null)btns.push(['Put back the original wording',()=>send({type:'edit',op:'restore',si,ii})]);
+  }
+  btns.push([sc.skip?"Don't skip this scene":'Skip this whole scene',()=>send({type:'edit',op:'skipScene',si,value:!sc.skip})]);
+  sheet(ii>=0?short(sc.items[ii].t):((sc.id||'')+' '+(sc.title||'')).trim(),btns);
+}
+function wording(si,ii){
+  const it=SCRIPT.scenes[si].items[ii];
+  const s=$('sheet');
+  s.innerHTML=`<div class="what" id="what">Change the wording</div><textarea id="wtext" aria-label="New wording"></textarea>`;
+  $('wtext').value=it.t;
+  const save=document.createElement('button');save.className='primary';save.textContent='Save';
+  save.onclick=()=>{const t=$('wtext').value.replace(/\s+/g,' ').trim();closeSheet();if(t&&t!==it.t)send({type:'edit',op:'text',si,ii,t})};
+  const c=document.createElement('button');c.textContent='Cancel';c.onclick=closeSheet;
+  s.append(save,c);s.classList.add('on');$('cover').classList.add('on');$('wtext').focus();
+}
+window.__remote={handle,send:o=>send(o),state:()=>STATE,order:()=>order,myViewRef};
+</script>
+</body>
+</html>

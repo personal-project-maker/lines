@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "android/**"
+      - "remote.html"
       - ".github/workflows/android.yml"
   workflow_dispatch:
 
@@ -32,6 +33,11 @@ jobs:
           mkdir -p android/app/src/main/assets
           rm -rf android/app/src/main/assets/model
           mv vosk-model-small-en-us-0.15 android/app/src/main/assets/model
+
+      - name: Add the remote control page
+        run: |
+          mkdir -p android/app/src/main/assets/web
+          cp remote.html android/app/src/main/assets/web/remote.html
 
       - name: Build the app
         working-directory: android

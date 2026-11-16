@@ -310,11 +310,14 @@ function buildModel(){
   SCRIPT.scenes.forEach((sc,si)=>{
     let cues=[];
     for(const it of sc.items){
-      if(it.cue){cues.push(it);continue}
+      if(it.cue){if(!sc.skip&&!it.skip)cues.push(it);continue}
+      if(sc.skip||it.skip)continue;   // skipped in Lines Follow
       if(sc.pre&&!S.pre){cues.push({cue:'You (pre-recorded)',t:it.t});continue}
-      const u={id:String(it.u),si,text:it.t,cues:cues,disp:[],start:E.length,idx:UNITS.length};
+      const skipW=new Set(it.skipWords||[]);
+      const text=skipW.size?it.t.split(/\s+/).filter(Boolean).filter((w,i)=>!skipW.has(i)).join(' '):it.t;
+      const u={id:String(it.u),si,text,cues:cues,disp:[],start:E.length,idx:UNITS.length};
       cues=[];
-      for(const w of it.t.split(/\s+/).filter(Boolean)){
+      for(const w of text.split(/\s+/).filter(Boolean)){
         const tk=toks(w);const d={w,from:E.length,to:E.length+tk.length};
         tk.forEach(t=>E.push({t,u:u.idx}));u.disp.push(d);
       }
@@ -673,7 +676,7 @@ function renderRead(){
     for(const it of sc.items){
       if(it.cue){html+='<div class="rd-cue"><b>'+esc(it.cue)+':</b> '+esc(it.t)+'</div>';continue}
       const u=UNITS.find(x=>x.id===String(it.u));
-      if(!u){html+='<div class="rd-cue"><b>You (pre-recorded):</b> '+esc(it.t)+'</div>';continue}
+      if(!u){html+='<div class="rd-cue"><b>'+(sc.skip||it.skip?'Skipped':'You (pre-recorded)')+':</b> '+esc(it.t)+'</div>';continue}
       const s=STATS[u.id],tr=isWeak(u);
       html+='<div class="rl'+(tr?' tricky':'')+'" role="button" tabindex="0" data-u="'+u.idx+'">'+esc(u.text)+
         (tr?' <span class="pill bad">'+(s.m+s.p)+'</span>':'')+
