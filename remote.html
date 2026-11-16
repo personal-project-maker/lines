@@ -71,6 +71,7 @@ button:focus-visible,select:focus-visible{outline:3px solid var(--accent);outlin
   <div class="opts">
     <label><input type="checkbox" id="follow" checked> Follow their screen</label>
     <label><input type="checkbox" id="push"> My scrolling moves their screen</label>
+    <label><input type="checkbox" id="readon"> Read other characters aloud (on their phone)</label>
     <label>Their screen shows <select id="show" style="min-height:36px;padding:4px 8px"><option value="0">whole script</option><option value="1">3 lines</option><option value="2">1 line</option><option value="3">a few words</option><option value="4">1 word</option></select></label>
     <span class="seg" role="group" aria-label="Mode"><button id="mjump" aria-pressed="true">Perform</button><button id="medit" aria-pressed="false">Edit script</button></span>
     <span>My view <button id="vminus" aria-label="Smaller text on my screen" style="min-height:32px;padding:2px 10px">-</button> <button id="vplus" aria-label="Bigger text on my screen" style="min-height:32px;padding:2px 10px">+</button></span>
@@ -157,6 +158,7 @@ function render(){
       if(it.cue){h+=`<div class="cue${sc.skip||it.skip?' skip':''}" data-si="${si}" data-ii="${ii}"><b>${esc(it.cue)}:</b> ${esc(it.t)}</div>`;return}
       const sk=new Set(it.skipWords||[]);
       h+=`<p class="ln${sc.skip||it.skip?' skip':''}" data-si="${si}" data-ii="${ii}">`;
+      if(it.readAloud)h+=`<span class="mark" style="color:var(--muted)" title="Read aloud for you">\uD83D\uDD0A</span>`;
       if(it.looked)h+=`<span class="mark" title="Looked at ${it.looked} times">\u25CF${it.looked>1?it.looked:''}</span>`;
       words(it.t).forEach((w,wi)=>{h+=`<span class="w${sk.has(wi)?' skip':''}" data-si="${si}" data-ii="${ii}" data-wi="${wi}">${esc(w)}</span> `});
       h+='</p>';
@@ -175,6 +177,7 @@ function applyState(force){
   $('pdot').className='dot'+(s.live?' live':'');
   $('pause').textContent=s.paused?'Resume':'Pause';
   if(s.show!=null&&document.activeElement!==$('show'))$('show').value=String(s.show);
+  if(s.readOn!=null)$('readon').checked=!!s.readOn;
   if(!wordEls.length)return;
   const ni=s.now?order.get(key(...s.now)):wordEls.length;
   const n=ni==null?wordEls.length:ni;
@@ -223,6 +226,7 @@ $('follow').onchange=e=>{if(e.target.checked&&STATE.view)scrollToRef(STATE.view,
 $('push').onchange=e=>{if(e.target.checked){$('follow').checked=true;const r=myViewRef();if(r)send({type:'scroll',ref:r})}};
 
 /* ---------------- controls ---------------- */
+$('readon').onchange=e=>send({type:'read',value:e.target.checked});
 $('show').onchange=e=>send({type:'show',level:+e.target.value});
 $('looked').onclick=()=>{send({type:'looked'});toast('Marked as looked at')};
 $('back').onclick=()=>send({type:'step',dir:-1});
@@ -273,6 +277,7 @@ function openEdit(t){
       btns.push(['Start following from here',()=>send({type:'jump',ref:[si,ii,wi]})]);
     }
     btns.push([it.skip?"Don't skip this line":'Skip this line',()=>send({type:'edit',op:'skipItem',si,ii,value:!it.skip})]);
+    if(!it.cue)btns.push([it.readAloud?'Stop reading this line for them':'Read this line aloud for them',()=>send({type:'edit',op:'readAloud',si,ii,value:!it.readAloud})]);
     btns.push(['Change the wording',()=>wording(si,ii)]);
     if(it.orig!=null)btns.push(['Put back the original wording',()=>send({type:'edit',op:'restore',si,ii})]);
     if(it.looked)btns.push([`Clear the "looked" mark (${it.looked})`,()=>send({type:'unlook',si,ii})]);
