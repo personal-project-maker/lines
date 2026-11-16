@@ -617,8 +617,15 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         } else {
             T = (tail.takeLast(4) + h).takeLast(10)
         }
-        val np = fm.locate(T, p) ?: return
-        setPos(np, read = true)
+        val np = fm.locate(T, p)
+        if (np != null) setPos(np, read = true)
+        // You paused with at most two words of the line left unheard: treat the line as finished,
+        // so the next character's line can be read without waiting for a word the phone missed.
+        if (final && readOn && readingBlock == 0) {
+            val u = fm.unitAt(minOf(p, fm.E.size - 1))
+            if (u != null && p > u.start && u.end - p in 1..2) setPos(u.end, read = true)
+        }
+        if (np == null) return
         fm.unitAt(minOf(p, fm.E.size - 1))?.let { noteRehearsed(it.sceneIdx, 0) }
     }
 
@@ -692,10 +699,16 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     private val ME = "(me)"
 
     private fun initTts() {
+        try { tts?.shutdown() } catch (_: Exception) {}
+        ttsReady = false
         tts = TextToSpeech(this) { st ->
+            if (st != TextToSpeech.SUCCESS) runOnUiThread { if (readOn) setStatus("Couldn't start the phone's text-to-speech", false) }
             if (st == TextToSpeech.SUCCESS) {
                 ttsReady = true
-                try { tts?.setLanguage(Locale.UK) } catch (_: Exception) {}
+                try {
+                    val r = tts?.setLanguage(Locale.UK) ?: 0
+                    if (r < 0) tts?.setLanguage(Locale.US)
+                } catch (_: Exception) {}
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) { if (utteranceId?.endsWith("-end") == true) runOnUiThread { blockDone(utteranceId) } }
@@ -710,8 +723,10 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         readOn = on
         prefs.edit().putBoolean("readOn", on).apply()
         if (!on) cancelReading(true)
-        lastArrival = p
-        toast(if (on) "Reading other characters aloud. It starts when you reach their next line, or tap one." else "Stopped reading other characters")
+        if (on && !ttsReady) { toast("The phone's voices aren't ready yet. If this keeps happening, check Android Settings, then Text-to-speech."); initTts() }
+        else toast(if (on) "Reading other characters aloud" else "Stopped reading other characters")
+        lastArrival = -1
+        if (on) maybeRead() else lastArrival = p
         scheduleState()
     }
 
@@ -777,6 +792,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     private fun speakBlock(parts: List<Pair<String, String>>, anchorChar: Int, after: Int) {
         val t = tts
         if (!ttsReady || t == null || parts.isEmpty()) {
+            if (parts.isNotEmpty()) setStatus("Couldn't read aloud: the phone's text-to-speech isn't working", false)
             if (after >= 0) setPos(after, read = true)
             return
         }
