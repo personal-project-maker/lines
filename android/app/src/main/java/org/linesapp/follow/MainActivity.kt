@@ -251,7 +251,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         // tap a word to move there; press and hold for skip and edit options
         val taps = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
                 val off = text.getOffsetForPosition(e.x, e.y)
                 if (editMode) { showEditMenu(off); return true }
                 tapToJump(off)
@@ -259,7 +259,8 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
             }
         })
         taps.setIsLongpressEnabled(false)
-        text.setOnTouchListener { _, ev -> taps.onTouchEvent(ev); false }
+        // Take the whole touch so the tap is seen when the finger lifts; the scroll box still takes over drags.
+        text.setOnTouchListener { _, ev -> taps.onTouchEvent(ev); true }
 
         val looked = button("I looked") { markLooked() }
         looked.contentDescription = "I looked at the script. Marks this line as not yet learned"
