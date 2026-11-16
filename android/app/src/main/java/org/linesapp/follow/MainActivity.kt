@@ -14,6 +14,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.text.InputType
 import android.text.Spannable
 import android.text.SpannableStringBuilder
@@ -48,6 +51,7 @@ import org.vosk.android.SpeechService
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.concurrent.thread
+import java.util.Locale
 import kotlin.math.max
 
 class MainActivity : Activity(), RecognitionListener, RemoteHost {
@@ -105,6 +109,13 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     private var shareDialog: AlertDialog? = null
     private var refreshShare: (() -> Unit)? = null
     private var editMode = false
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var readOn = false
+    private var lastArrival = -1
+    private var readingBlock = 0
+    private var blockCounter = 0
+    private var afterReadPos = -1
     private var showLevel = 0       // 0 whole script, 1 three lines, 2 one line, 3 a few words, 4 one word
     private lateinit var showBtn: Button
     private val hideSpans = ArrayList<Any>()
@@ -122,6 +133,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         prefs = getSharedPreferences("lines", MODE_PRIVATE)
         fontScale = prefs.getFloat("fontScale", 1f)
         showLevel = prefs.getInt("show", 0)
+        readOn = prefs.getBoolean("readOn", false)
         runs = try { JSONArray(prefs.getString("runs", "[]")) } catch (e: Exception) { JSONArray() }
         local = LocalServer(this, this)
         val room = prefs.getString("room", null)
@@ -130,6 +142,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         buildUi()
         loadSavedScript()
         loadSpeechModel()
+        initTts()
         if (prefs.getBoolean("shareLocal", false)) local.start()
         if (prefs.getBoolean("shareOnline", false)) online.start()
         handleViewIntent(intent)
@@ -241,10 +254,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val off = text.getOffsetForPosition(e.x, e.y)
                 if (editMode) { showEditMenu(off); return true }
-                val w = wordAtChar(off) ?: return false
-                val fm = model ?: return false
-                tail.clear()
-                setPos(fm.posFor(w.si, w.ii, w.wi))
+                tapToJump(off)
                 return true
             }
         })
@@ -296,6 +306,8 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         val m = PopupMenu(this, anchor)
         m.menu.add(0, 1, 0, "Load a script")
         m.menu.add(0, 2, 1, "Make a script (opens the script maker)")
+        m.menu.add(0, 8, 2, "Read other characters aloud").setCheckable(true).setChecked(readOn)
+        m.menu.add(0, 9, 2, "Reading aloud settings")
         m.menu.add(0, 3, 2, "Share my screen")
         m.menu.add(0, 5, 3, "Lines I've looked at")
         m.menu.add(0, 6, 4, "My progress")
@@ -310,6 +322,8 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                 5 -> showLooked()
                 6 -> showProgress()
                 7 -> startNewRun()
+                8 -> setReadOn(!readOn)
+                9 -> readingSettings()
             }
             true
         }
@@ -434,6 +448,11 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                     val u = fm.units[unitIdx++]
                     u.anchorChar = anchor
                     anchor = -1
+                    if (it.readAloud) {
+                        val rs = sb.length
+                        sb.append("\uD83D\uDD0A ")
+                        sb.setSpan(RelativeSizeSpan(0.6f), rs, sb.length - 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
                     if (it.looked > 0) {
                         val ms = sb.length
                         sb.append(if (it.looked > 1) "\u25CF${it.looked} " else "\u25CF ")
@@ -508,7 +527,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     }
 
     // ---------------- cursor ----------------
-    private fun setPos(np0: Int, smooth: Boolean = true, force: Boolean = false) {
+    private fun setPos(np0: Int, smooth: Boolean = true, force: Boolean = false, read: Boolean = false) {
         val fm = model ?: return
         val np = np0.coerceIn(0, fm.E.size)
         val moved = np != p
@@ -538,6 +557,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         if (u != null && p == u.start && u.anchorChar >= 0) target = u.anchorChar
         if (moved || force) scrollToChar(target, smooth)
         scheduleState()
+        if (read && readOn && p != lastArrival) maybeRead()
     }
 
     private fun scrollToChar(c: Int, smooth: Boolean) {
@@ -570,8 +590,10 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         if (dir > 0) {
             var k = u.idx + 1
             while (k < fm.units.size && fm.units[k].start == fm.units[k].end) k++
-            setPos(if (p >= fm.E.size) fm.E.size else if (k < fm.units.size) fm.units[k].start else fm.E.size)
+            cancelReading(false)
+            setPos(if (p >= fm.E.size) fm.E.size else if (k < fm.units.size) fm.units[k].start else fm.E.size, read = true)
         } else {
+            cancelReading(false)
             if (p > u.start && p < fm.E.size) setPos(u.start)
             else {
                 var k = (if (p >= fm.E.size) fm.units.size else u.idx) - 1
@@ -595,7 +617,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
             T = (tail.takeLast(4) + h).takeLast(10)
         }
         val np = fm.locate(T, p) ?: return
-        setPos(np)
+        setPos(np, read = true)
         fm.unitAt(minOf(p, fm.E.size - 1))?.let { noteRehearsed(it.sceneIdx, 0) }
     }
 
@@ -616,6 +638,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                 add("Start following from here") { model?.let { m -> tail.clear(); setPos(m.posFor(si, ii, w.wi)) } }
             }
             add(if (item.skip) "Don't skip this line" else "Skip this line") { edit("skipItem", si, ii, -1, !item.skip, null) }
+            if (item.cue == null) add(if (item.readAloud) "Stop reading this line for me" else "Read this line aloud for me") { edit("readAloud", si, ii, -1, !item.readAloud, null) }
             add("Change the wording") { askWording(si, ii) }
             if (item.looked > 0) add("Clear the \"looked\" mark (${item.looked})") { setLooked(si, ii, 0) }
             if (item.orig != null) add("Put back the original wording") { edit("restore", si, ii, -1, true, null) }
@@ -646,6 +669,234 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // ---------------- tapping to jump ----------------
+    private fun tapToJump(off: Int) {
+        val fm = model ?: return
+        val sc = script ?: return
+        tail.clear()
+        cancelReading(false)
+        val w = wordAtChar(off)
+        val a = if (w != null) intArrayOf(0, w.si, w.ii) else anchorAtChar(off) ?: return
+        val si = a[1]; val ii = a[2]
+        val item = if (ii >= 0) sc.scenes[si].items[ii] else null
+        if (item?.cue != null) { tapCue(si, ii); return }
+        val np = fm.posFor(si, max(0, ii), 0)   // start of the line, or of the scene
+        lastArrival = np
+        setPos(np, force = true)
+    }
+
+    // ---------------- reading lines aloud ----------------
+    private val ME = "(me)"
+
+    private fun initTts() {
+        tts = TextToSpeech(this) { st ->
+            if (st == TextToSpeech.SUCCESS) {
+                ttsReady = true
+                try { tts?.setLanguage(Locale.UK) } catch (_: Exception) {}
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) { if (utteranceId?.endsWith("-end") == true) runOnUiThread { blockDone(utteranceId) } }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) { if (utteranceId?.endsWith("-end") == true) runOnUiThread { blockDone(utteranceId) } }
+                })
+            }
+        }
+    }
+
+    private fun setReadOn(on: Boolean) {
+        readOn = on
+        prefs.edit().putBoolean("readOn", on).apply()
+        if (!on) cancelReading(true)
+        lastArrival = p
+        toast(if (on) "Reading other characters aloud. It starts when you reach their next line, or tap one." else "Stopped reading other characters")
+        scheduleState()
+    }
+
+    private fun flatItems(): List<IntArray> {
+        val out = ArrayList<IntArray>()
+        script?.scenes?.forEachIndexed { si, s -> s.items.indices.forEach { ii -> out.add(intArrayOf(si, ii)) } }
+        return out
+    }
+
+    private fun unitOf(si: Int, ii: Int): LineUnit? = model?.units?.firstOrNull { it.sceneIdx == si && it.itemIdx == ii }
+    private fun isSpoken(si: Int, ii: Int): Boolean { val u = unitOf(si, ii); return u != null && u.end > u.start }
+
+    /** Other characters' lines between two places in the script, leaving out skipped ones. */
+    private fun cuesBetween(from: Int, until: Int, flat: List<IntArray>): ArrayList<Pair<String, String>> {
+        val sc = script ?: return ArrayList()
+        val out = ArrayList<Pair<String, String>>()
+        for (k in max(0, from) until minOf(until, flat.size)) {
+            val scene = sc.scenes[flat[k][0]]; val it = scene.items[flat[k][1]]
+            if (it.cue != null && !it.skip && !scene.skip && it.t.isNotBlank()) out.add(it.cue to it.t)
+        }
+        return out
+    }
+
+    /** You've just reached the start of one of your lines (or the end): read what comes before it. */
+    private fun maybeRead() {
+        val fm = model ?: return
+        val sc = script ?: return
+        lastArrival = p
+        val u = fm.units.firstOrNull { it.start == p && it.end > it.start }
+        if (u == null && p != fm.E.size) return
+        val flat = flatItems()
+        val fu = if (u != null) flat.indexOfFirst { it[0] == u.sceneIdx && it[1] == u.itemIdx } else flat.size
+        var fp = -1
+        for (k in fu - 1 downTo 0) { val it = sc.scenes[flat[k][0]].items[flat[k][1]]; if (it.cue == null && isSpoken(flat[k][0], flat[k][1])) { fp = k; break } }
+        val parts = cuesBetween(fp + 1, fu, flat)
+        var after = -1
+        if (u != null) { val it = sc.scenes[u.sceneIdx].items[u.itemIdx]; if (it.readAloud) { parts.add(ME to it.t); after = u.end } }
+        if (parts.isEmpty()) return
+        val firstAnchor = if (fp + 1 < flat.size) charFor(flat[fp + 1][0], flat[fp + 1][1], -1) ?: -1 else -1
+        speakBlock(parts, firstAnchor, after)
+    }
+
+    /** A tap on another character's line: go there and read from it. */
+    private fun tapCue(si: Int, ii: Int) {
+        val fm = model ?: return
+        val sc = script ?: return
+        val flat = flatItems()
+        val k = flat.indexOfFirst { it[0] == si && it[1] == ii }
+        if (k < 0) return
+        var fu = flat.size
+        for (j in k until flat.size) { val it = sc.scenes[flat[j][0]].items[flat[j][1]]; if (it.cue == null && isSpoken(flat[j][0], flat[j][1])) { fu = j; break } }
+        val target = if (fu < flat.size) fm.posFor(flat[fu][0], flat[fu][1], 0) else fm.E.size
+        lastArrival = target
+        setPos(target, smooth = false)
+        val anchor = charFor(si, ii, -1) ?: -1
+        if (!readOn) { if (anchor >= 0) scrollToChar(anchor, true); return }
+        val parts = cuesBetween(k, fu, flat)
+        var after = -1
+        if (fu < flat.size) { val it = sc.scenes[flat[fu][0]].items[flat[fu][1]]; if (it.readAloud) { parts.add(ME to it.t); after = unitOf(flat[fu][0], flat[fu][1])?.end ?: -1 } }
+        speakBlock(parts, anchor, after)
+    }
+
+    private fun speakBlock(parts: List<Pair<String, String>>, anchorChar: Int, after: Int) {
+        val t = tts
+        if (!ttsReady || t == null || parts.isEmpty()) {
+            if (after >= 0) setPos(after, read = true)
+            return
+        }
+        stopListening()
+        t.stop()
+        val id = ++blockCounter
+        readingBlock = id
+        afterReadPos = after
+        val rate = prefs.getFloat("rate", 1f)
+        val gap = prefs.getInt("gap", 500).toLong()
+        parts.forEachIndexed { i, (who, words) ->
+            if (gap > 0) t.playSilentUtterance(gap, TextToSpeech.QUEUE_ADD, "b$id-gap$i")
+            voiceFor(who)?.let { v -> try { t.setVoice(v) } catch (_: Exception) {} }
+            t.setPitch(pitchFor(who))
+            t.setSpeechRate(rate)
+            t.speak(words, TextToSpeech.QUEUE_ADD, null, if (i == parts.size - 1) "b$id-end" else "b$id-$i")
+        }
+        val who = parts.first().first
+        setStatus(if (who == ME) "Reading your line for you..." else "Reading ${who}'s line...", false)
+        if (anchorChar >= 0) scrollToChar(anchorChar, true)
+    }
+
+    private fun blockDone(uid: String) {
+        if (readingBlock == 0 || !uid.startsWith("b$readingBlock-")) return
+        readingBlock = 0
+        val a = afterReadPos
+        afterReadPos = -1
+        if (a >= 0) setPos(a, read = true)
+        if (readingBlock == 0) startListening()
+    }
+
+    /** Stops reading (if it is) and goes back to listening unless asked not to. */
+    private fun cancelReading(resume: Boolean) {
+        if (readingBlock == 0) return
+        readingBlock = 0
+        afterReadPos = -1
+        try { tts?.stop() } catch (_: Exception) {}
+        if (resume) startListening()
+    }
+
+    private fun voices(): List<Voice> = try {
+        tts?.voices?.filter {
+            it.locale.language == "en" && !it.isNetworkConnectionRequired &&
+                it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
+        }?.sortedBy { it.name } ?: emptyList()
+    } catch (e: Exception) { emptyList() }
+
+    private fun characters(): List<String> {
+        val out = LinkedHashSet<String>()
+        script?.scenes?.forEach { s -> s.items.forEach { it.cue?.let { c -> out.add(c) } } }
+        return out.toList()
+    }
+
+    private val PITCHES = floatArrayOf(1.0f, 0.85f, 1.15f, 0.95f, 1.08f)
+    private val PITCH_NAMES = arrayOf("normal", "lower", "higher")
+    private val PITCH_VALUES = floatArrayOf(1.0f, 0.82f, 1.18f)
+
+    private fun voiceFor(who: String): Voice? {
+        val vs = voices()
+        if (vs.isEmpty()) return null
+        prefs.getString("voice:$who", null)?.let { n -> vs.firstOrNull { it.name == n }?.let { return it } }
+        val i = if (who == ME) 0 else characters().indexOf(who) + 1
+        return vs[max(0, i) % vs.size]
+    }
+
+    private fun pitchFor(who: String): Float {
+        val saved = prefs.getFloat("pitch:$who", -1f)
+        if (saved > 0) return saved
+        val i = if (who == ME) 0 else characters().indexOf(who) + 1
+        return PITCHES[max(0, i) % PITCHES.size]
+    }
+
+    private fun readingSettings() {
+        val rate = prefs.getFloat("rate", 1f)
+        val gap = prefs.getInt("gap", 500)
+        val items = arrayOf(
+            (if (readOn) "Turn off" else "Turn on") + " reading other characters",
+            "Speed: " + when { rate < 0.8f -> "slow"; rate < 0.95f -> "a bit slow"; rate < 1.1f -> "normal"; rate < 1.3f -> "a bit fast"; else -> "fast" },
+            "Pause before each line: " + if (gap == 0) "none" else "${gap / 1000.0} seconds",
+            "Choose a voice for each character",
+            "Voice for lines read for me",
+            "Test the voices")
+        AlertDialog.Builder(this)
+            .setTitle("Reading aloud")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> setReadOn(!readOn)
+                    1 -> pick("Speed", arrayOf("Slow", "A bit slow", "Normal", "A bit fast", "Fast")) { i ->
+                        prefs.edit().putFloat("rate", floatArrayOf(0.7f, 0.85f, 1f, 1.2f, 1.45f)[i]).apply(); readingSettings() }
+                    2 -> pick("Pause before each line", arrayOf("None", "Half a second", "1 second", "2 seconds", "3 seconds")) { i ->
+                        prefs.edit().putInt("gap", intArrayOf(0, 500, 1000, 2000, 3000)[i]).apply(); readingSettings() }
+                    3 -> { val cs = characters(); if (cs.isEmpty()) toast("There are no other characters in this script")
+                        else pick("Whose voice?", cs.toTypedArray()) { i -> chooseVoice(cs[i]) } }
+                    4 -> chooseVoice(ME)
+                    5 -> { val parts = characters().take(4).map { it to "This is how $it will sound." }.toMutableList()
+                        parts.add(ME to "And this is how your lines will sound when I read them for you.")
+                        speakBlock(parts, -1, -1) }
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun pick(title: String, options: Array<String>, then: (Int) -> Unit) {
+        AlertDialog.Builder(this).setTitle(title).setItems(options) { _, w -> then(w) }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun chooseVoice(who: String) {
+        val vs = voices()
+        if (vs.isEmpty()) { toast("No offline English voices found. You can add them in Android Settings, under Text-to-speech."); return }
+        val labels = ArrayList<String>(); val pairs = ArrayList<Pair<Voice, Int>>()
+        vs.forEachIndexed { i, v ->
+            val where = v.locale.displayCountry.ifBlank { v.locale.displayLanguage }
+            for (pi in PITCH_NAMES.indices) { labels.add("Voice ${i + 1} ($where), ${PITCH_NAMES[pi]}"); pairs.add(v to pi) }
+        }
+        val name = if (who == ME) "your lines" else who
+        pick("Voice for $name", labels.toTypedArray()) { i ->
+            val (v, pi) = pairs[i]
+            prefs.edit().putString("voice:$who", v.name).putFloat("pitch:$who", PITCH_VALUES[pi]).apply()
+            speakBlock(listOf(who to "This is how ${if (who == ME) "your lines" else who} will sound."), -1, -1)
+        }
     }
 
     // ---------------- show less of the script ----------------
@@ -881,6 +1132,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
             "skipWord" -> { item ?: return; if (value) item.skipWords.add(wi) else item.skipWords.remove(wi) }
             "skipItem" -> { item ?: return; item.skip = value }
             "skipScene" -> { scene ?: return; scene.skip = value }
+            "readAloud" -> { item ?: return; if (item.cue != null) return; item.readAloud = value }
             "text" -> {
                 item ?: return; val t = newText?.trim() ?: return
                 if (t.isEmpty()) return
@@ -931,6 +1183,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         o.put("paused", paused)
         o.put("font", fontScale.toDouble())
         o.put("show", showLevel)
+        o.put("readOn", readOn)
         o.put("status", statusText)
         o.put("live", statusLive)
         o.put("title", titleView.text.toString())
@@ -970,7 +1223,11 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                 when (o.optString("type")) {
                     "hello" -> onRemoteJoined()
                     "jump" -> { val r = ref("ref") ?: return@runOnUiThread; fm ?: return@runOnUiThread
-                        tail.clear(); setPos(fm.posFor(r[0], r.getOrElse(1) { 0 }, r.getOrElse(2) { 0 }), force = true) }
+                        tail.clear(); cancelReading(false)
+                        val si = r[0]; val ii = r.getOrElse(1) { 0 }
+                        val it = script?.scenes?.getOrNull(si)?.items?.getOrNull(ii)
+                        if (it?.cue != null) tapCue(si, ii)
+                        else { val np = fm.posFor(si, ii, r.getOrElse(2) { 0 }); lastArrival = np; setPos(np, force = true) } }
                     "step" -> stepLine(if (o.optInt("dir") < 0) -1 else 1)
                     "pause" -> setPaused(o.optBoolean("value", !paused))
                     "font" -> changeFont(o.optDouble("delta", 0.0).toFloat())
@@ -978,6 +1235,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                         charFor(r[0], r.getOrElse(1) { -1 }, r.getOrElse(2) { -1 })?.let { scrollToChar(it, true) } }
                     "looked" -> markLooked()
                     "show" -> setShow(o.optInt("level", 0))
+                    "read" -> setReadOn(o.optBoolean("value", !readOn))
                     "unlook" -> setLooked(o.optInt("si", -1), o.optInt("ii", -1), 0)
                     "edit" -> edit(o.optString("op"), o.optInt("si", -1), o.optInt("ii", -1), o.optInt("wi", -1),
                         o.optBoolean("value", true), if (o.has("t")) o.optString("t") else null)
@@ -1116,7 +1374,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     private fun startListening() {
         val fm = model ?: return
         val vm = voskModel ?: return
-        if (paused || !visible || speech != null) return
+        if (paused || !visible || speech != null || readingBlock != 0) return
         if (!hasMic()) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_MIC)
             return
@@ -1153,6 +1411,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         paused = v
         pauseBtn.text = if (paused) "Resume" else "Pause"
         if (paused) {
+            cancelReading(false)
             stopListening()
             setStatus("Paused", false)
         } else {
@@ -1206,6 +1465,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
 
     override fun onStop() {
         super.onStop()
+        cancelReading(false)
         visible = false
         stopListening()
         if (!paused && model != null) setStatus("Ready", false)
@@ -1213,6 +1473,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
 
     override fun onDestroy() {
         super.onDestroy()
+        try { tts?.shutdown() } catch (_: Exception) {}
         stopListening()
         local.stop()
         online.stop()
