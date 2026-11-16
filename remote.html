@@ -44,6 +44,8 @@ button:focus-visible,select:focus-visible{outline:3px solid var(--accent);outlin
 .sc.skip{text-decoration:line-through}
 .bottom{display:flex;gap:6px;margin-top:8px}
 .bottom button{flex:1}
+#looked{width:100%;margin-top:8px;min-height:52px;background:#5a2330;font-weight:700}
+.mark{color:var(--bad);font-size:.6em;margin-right:.3em}
 .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-radius:18px 18px 0 0;padding:14px;display:none;flex-direction:column;gap:8px;z-index:20;box-shadow:0 -8px 30px rgba(0,0,0,.6);max-width:900px;margin:0 auto}
 .sheet.on{display:flex}
 .sheet .what{color:var(--muted);font-size:.9em}
@@ -69,10 +71,12 @@ button:focus-visible,select:focus-visible{outline:3px solid var(--accent);outlin
   <div class="opts">
     <label><input type="checkbox" id="follow" checked> Follow their screen</label>
     <label><input type="checkbox" id="push"> My scrolling moves their screen</label>
+    <label>Their screen shows <select id="show" style="min-height:36px;padding:4px 8px"><option value="0">whole script</option><option value="1">3 lines</option><option value="2">1 line</option><option value="3">a few words</option><option value="4">1 word</option></select></label>
     <span class="seg" role="group" aria-label="Mode"><button id="mjump" aria-pressed="true">Perform</button><button id="medit" aria-pressed="false">Edit script</button></span>
     <span>My view <button id="vminus" aria-label="Smaller text on my screen" style="min-height:32px;padding:2px 10px">-</button> <button id="vplus" aria-label="Bigger text on my screen" style="min-height:32px;padding:2px 10px">+</button></span>
   </div>
   <div id="wrapbox"><div id="box" tabindex="0" aria-label="Script"><div class="msg" id="placeholder">Waiting for the phone...</div></div><div id="reading" aria-hidden="true"></div></div>
+  <button id="looked" aria-label="They looked at the script. Marks this line as not yet learned">They looked</button>
   <div class="bottom">
     <button id="back">Back a line</button>
     <button id="pause" class="primary">Pause</button>
@@ -153,6 +157,7 @@ function render(){
       if(it.cue){h+=`<div class="cue${sc.skip||it.skip?' skip':''}" data-si="${si}" data-ii="${ii}"><b>${esc(it.cue)}:</b> ${esc(it.t)}</div>`;return}
       const sk=new Set(it.skipWords||[]);
       h+=`<p class="ln${sc.skip||it.skip?' skip':''}" data-si="${si}" data-ii="${ii}">`;
+      if(it.looked)h+=`<span class="mark" title="Looked at ${it.looked} times">\u25CF${it.looked>1?it.looked:''}</span>`;
       words(it.t).forEach((w,wi)=>{h+=`<span class="w${sk.has(wi)?' skip':''}" data-si="${si}" data-ii="${ii}" data-wi="${wi}">${esc(w)}</span> `});
       h+='</p>';
     });
@@ -169,6 +174,7 @@ function applyState(force){
   $('pstatus').textContent=s.status||'';
   $('pdot').className='dot'+(s.live?' live':'');
   $('pause').textContent=s.paused?'Resume':'Pause';
+  if(s.show!=null&&document.activeElement!==$('show'))$('show').value=String(s.show);
   if(!wordEls.length)return;
   const ni=s.now?order.get(key(...s.now)):wordEls.length;
   const n=ni==null?wordEls.length:ni;
@@ -217,6 +223,8 @@ $('follow').onchange=e=>{if(e.target.checked&&STATE.view)scrollToRef(STATE.view,
 $('push').onchange=e=>{if(e.target.checked){$('follow').checked=true;const r=myViewRef();if(r)send({type:'scroll',ref:r})}};
 
 /* ---------------- controls ---------------- */
+$('show').onchange=e=>send({type:'show',level:+e.target.value});
+$('looked').onclick=()=>{send({type:'looked'});toast('Marked as looked at')};
 $('back').onclick=()=>send({type:'step',dir:-1});
 $('fwd').onclick=()=>send({type:'step',dir:1});
 $('pause').onclick=()=>send({type:'pause',value:!STATE.paused});
@@ -267,6 +275,7 @@ function openEdit(t){
     btns.push([it.skip?"Don't skip this line":'Skip this line',()=>send({type:'edit',op:'skipItem',si,ii,value:!it.skip})]);
     btns.push(['Change the wording',()=>wording(si,ii)]);
     if(it.orig!=null)btns.push(['Put back the original wording',()=>send({type:'edit',op:'restore',si,ii})]);
+    if(it.looked)btns.push([`Clear the "looked" mark (${it.looked})`,()=>send({type:'unlook',si,ii})]);
   }
   btns.push([sc.skip?"Don't skip this scene":'Skip this whole scene',()=>send({type:'edit',op:'skipScene',si,value:!sc.skip})]);
   sheet(ii>=0?short(sc.items[ii].t):((sc.id||'')+' '+(sc.title||'')).trim(),btns);

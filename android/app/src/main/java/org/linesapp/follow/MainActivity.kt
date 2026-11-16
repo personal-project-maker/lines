@@ -60,6 +60,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     private val SKIPPED = Color.parseColor("#55506A")
     private val ACCENT = Color.parseColor("#F2C14E")
     private val OK = Color.parseColor("#6FD08C")
+    private val LOOKED = Color.parseColor("#FF7A7A")
 
     private val REQ_MIC = 1
     private val REQ_FILE = 2
@@ -104,6 +105,11 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     private var shareDialog: AlertDialog? = null
     private var refreshShare: (() -> Unit)? = null
     private var editMode = false
+    private var showLevel = 0       // 0 whole script, 1 three lines, 2 one line, 3 a few words, 4 one word
+    private lateinit var showBtn: Button
+    private val hideSpans = ArrayList<Any>()
+    private var runs = JSONArray()
+    private var runsSavedAt = 0L
     private lateinit var performBtn: Button
     private lateinit var editBtn: Button
     private lateinit var scrollBg: GradientDrawable
@@ -115,6 +121,8 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         window.navigationBarColor = BG
         prefs = getSharedPreferences("lines", MODE_PRIVATE)
         fontScale = prefs.getFloat("fontScale", 1f)
+        showLevel = prefs.getInt("show", 0)
+        runs = try { JSONArray(prefs.getString("runs", "[]")) } catch (e: Exception) { JSONArray() }
         local = LocalServer(this, this)
         val room = prefs.getString("room", null)
         val key = prefs.getString("key", null)
@@ -205,10 +213,14 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         modeRow.orientation = LinearLayout.HORIZONTAL
         modeRow.setPadding(0, 0, 0, dp(8))
         performBtn = button("Perform") { setEditMode(false) }
-        editBtn = button("Edit script") { setEditMode(true) }
+        editBtn = button("Edit") { setEditMode(true) }
         performBtn.minHeight = dp(44); editBtn.minHeight = dp(44)
         modeRow.addView(performBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.marginEnd = dp(6) })
-        modeRow.addView(editBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        modeRow.addView(editBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.marginEnd = dp(6) })
+        showBtn = button("") { chooseShow() }
+        showBtn.minHeight = dp(44)
+        modeRow.addView(showBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f))
+        updateShowBtn()
         root.addView(modeRow)
 
         scroll = ScrollView(this)
@@ -239,9 +251,16 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         taps.setIsLongpressEnabled(false)
         text.setOnTouchListener { _, ev -> taps.onTouchEvent(ev); false }
 
+        val looked = button("I looked") { markLooked() }
+        looked.contentDescription = "I looked at the script. Marks this line as not yet learned"
+        (looked.background as GradientDrawable).setColor(Color.parseColor("#5A2330"))
+        looked.minHeight = dp(64)
+        looked.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+        root.addView(looked, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = dp(10) })
+
         val bottom = LinearLayout(this)
         bottom.orientation = LinearLayout.HORIZONTAL
-        bottom.setPadding(0, dp(10), 0, 0)
+        bottom.setPadding(0, dp(8), 0, 0)
         val blp = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.marginEnd = dp(6) } }
         bottom.addView(button("Back a line") { stepLine(-1) }, blp())
         pauseBtn = button("Pause", primary = true) { setPaused(!paused) }
@@ -278,13 +297,19 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         m.menu.add(0, 1, 0, "Load a script")
         m.menu.add(0, 2, 1, "Make a script (opens the script maker)")
         m.menu.add(0, 3, 2, "Share my screen")
-        m.menu.add(0, 4, 3, "Undo all skips and changes")
+        m.menu.add(0, 5, 3, "Lines I've looked at")
+        m.menu.add(0, 6, 4, "My progress")
+        m.menu.add(0, 7, 4, "Start a new run")
+        m.menu.add(0, 4, 5, "Undo all skips and changes")
         m.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> pickScript()
                 2 -> try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MAKER_URL))) } catch (e: Exception) { toast("Couldn't open the browser") }
                 3 -> showShare()
                 4 -> confirmUndoAll()
+                5 -> showLooked()
+                6 -> showProgress()
+                7 -> startNewRun()
             }
             true
         }
@@ -409,6 +434,12 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                     val u = fm.units[unitIdx++]
                     u.anchorChar = anchor
                     anchor = -1
+                    if (it.looked > 0) {
+                        val ms = sb.length
+                        sb.append(if (it.looked > 1) "\u25CF${it.looked} " else "\u25CF ")
+                        sb.setSpan(ForegroundColorSpan(LOOKED), ms, sb.length - 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        sb.setSpan(RelativeSizeSpan(0.6f), ms, sb.length - 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
                     for (d in u.disp) {
                         d.charStart = sb.length
                         sb.append(d.w)
@@ -493,6 +524,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         } else {
             sp.removeSpan(nowSpan); sp.removeSpan(nowUnderline)
         }
+        applyHiding(sp, now)
         prefs.edit().putInt("pos", p).apply()
 
         val u = fm.unitAt(minOf(p, fm.E.size - 1))
@@ -564,6 +596,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         }
         val np = fm.locate(T, p) ?: return
         setPos(np)
+        fm.unitAt(minOf(p, fm.E.size - 1))?.let { noteRehearsed(it.sceneIdx, 0) }
     }
 
     // ---------------- editing: skip and change wording ----------------
@@ -584,6 +617,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
             }
             add(if (item.skip) "Don't skip this line" else "Skip this line") { edit("skipItem", si, ii, -1, !item.skip, null) }
             add("Change the wording") { askWording(si, ii) }
+            if (item.looked > 0) add("Clear the \"looked\" mark (${item.looked})") { setLooked(si, ii, 0) }
             if (item.orig != null) add("Put back the original wording") { edit("restore", si, ii, -1, true, null) }
         }
         add(if (scene.skip) "Don't skip this scene" else "Skip this whole scene") { edit("skipScene", si, -1, -1, !scene.skip, null) }
@@ -611,6 +645,218 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                 if (t.isNotEmpty() && t != item.t) edit("text", si, ii, -1, true, t)
             }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // ---------------- show less of the script ----------------
+    private val SHOW_NAMES = arrayOf("Whole script", "3 lines", "1 line", "A few words", "1 word")
+
+    private fun updateShowBtn() {
+        showBtn.text = "Show: " + SHOW_NAMES[showLevel].lowercase()
+        showBtn.contentDescription = "Show: " + SHOW_NAMES[showLevel] + ". Tap to change how much of your script is shown"
+    }
+
+    private fun chooseShow() {
+        AlertDialog.Builder(this)
+            .setTitle("How much of your script to show")
+            .setSingleChoiceItems(SHOW_NAMES, showLevel) { d, which -> setShow(which); d.dismiss() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun setShow(level: Int) {
+        showLevel = level.coerceIn(0, 4)
+        prefs.edit().putInt("show", showLevel).apply()
+        updateShowBtn()
+        setPos(p, smooth = false, force = false)
+        scheduleState()
+    }
+
+    /** Hides your upcoming words past the chosen amount. Cues and headings stay; hidden words keep their space. */
+    private fun applyHiding(sp: Spannable, now: DispWord?) {
+        for (h in hideSpans) sp.removeSpan(h)
+        hideSpans.clear()
+        val fm = model ?: return
+        if (showLevel == 0 || now == null) return
+        val nowIdx = words.indexOf(now)
+        if (nowIdx < 0) return
+        var endIdx = nowIdx
+        when (showLevel) {
+            1, 2 -> {
+                var k = fm.units.indexOfFirst { it.sceneIdx == now.si && it.itemIdx == now.ii }
+                if (k < 0) return
+                var more = if (showLevel == 1) 2 else 0
+                while (more > 0 && k + 1 < fm.units.size) { k++; if (fm.units[k].start < fm.units[k].end) more-- }
+                val last = fm.units[k].disp.lastOrNull()
+                if (last != null) endIdx = max(nowIdx, words.indexOf(last))
+            }
+            3 -> { var c = 0; var i = nowIdx; while (i < words.size && c < 4) { if (!words[i].skipped) { c++; endIdx = i }; i++ } }
+            else -> endIdx = nowIdx
+        }
+        var i = endIdx + 1
+        while (i < words.size) {
+            val a = words[i]
+            var j = i
+            while (j + 1 < words.size && words[j + 1].si == a.si && words[j + 1].ii == a.ii) j++
+            val span = ForegroundColorSpan(PANEL)
+            sp.setSpan(span, a.charStart, words[j].charEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            hideSpans.add(span)
+            i = j + 1
+        }
+    }
+
+    // ---------------- progress over time ----------------
+
+    private fun sceneKey(si: Int): String {
+        val sc = script?.scenes?.getOrNull(si) ?: return "?"
+        return (sc.id + " " + sc.title).trim()
+    }
+
+    private fun currentRun(forceNew: Boolean = false): JSONObject {
+        val now = System.currentTimeMillis()
+        val last = if (runs.length() > 0) runs.optJSONObject(runs.length() - 1) else null
+        // Runs only change when you start a new one; the very first is made for you.
+        if (!forceNew && last != null) return last
+        val r = JSONObject(); r.put("start", now); r.put("end", now); r.put("scenes", JSONObject())
+        runs.put(r)
+        while (runs.length() > 60) runs.remove(0)
+        return r
+    }
+
+    /** Notes that you rehearsed this scene in the current run, adding any looks. */
+    private fun noteRehearsed(si: Int, looks: Int) {
+        if (script == null) return
+        val r = currentRun()
+        val sc = r.optJSONObject("scenes") ?: JSONObject().also { r.put("scenes", it) }
+        val k = sceneKey(si)
+        sc.put(k, sc.optInt(k, 0) + looks)
+        r.put("end", System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        if (looks > 0 || now - runsSavedAt > 10000) { prefs.edit().putString("runs", runs.toString()).apply(); runsSavedAt = now }
+    }
+
+    private fun startNewRun() {
+        currentRun(forceNew = true)
+        prefs.edit().putString("runs", runs.toString()).apply()
+        toast("New run started. Looks from now on count towards this run.")
+    }
+
+    private fun showProgress() {
+        val sc = script ?: return
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(16), dp(8), dp(16), dp(8))
+        fun label(s: String, size: Float, color: Int = TEXT, bold: Boolean = false): TextView {
+            val t = TextView(this); t.text = s; t.setTextSize(TypedValue.COMPLEX_UNIT_SP, size); t.setTextColor(color)
+            if (bold) t.setTypeface(null, Typeface.BOLD); box.addView(t); return t
+        }
+        val recent = ArrayList<JSONObject>()
+        for (i in max(0, runs.length() - 8) until runs.length()) runs.optJSONObject(i)?.let { r -> if ((r.optJSONObject("scenes")?.length() ?: 0) > 0) recent.add(r) }
+        label("Each square is a run, oldest on the left, newest on the right. Start a new run from the Menu before each rehearsal. The number is how many times you looked. Green: none. Amber: 1 or 2. Red: 3 or more. Blank: not rehearsed in that run.", 13f, MUTED)
+        if (recent.isEmpty()) label("\nNo runs yet. Start following and tap \"I looked\" whenever you need the script.", 15f)
+        val fmt = java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.UK)
+        fun cell(row: LinearLayout, n: Int?, run: JSONObject) {
+            val t = TextView(this)
+            t.gravity = Gravity.CENTER
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            t.setTextColor(Color.parseColor("#1B1608"))
+            val bg = GradientDrawable(); bg.cornerRadius = dp(6).toFloat()
+            when {
+                n == null -> { bg.setColor(Color.TRANSPARENT); bg.setStroke(dp(1), Color.parseColor("#3A3548")); t.text = "" }
+                n == 0 -> { bg.setColor(OK); t.text = "0" }
+                n <= 2 -> { bg.setColor(Color.parseColor("#FFB86B")); t.text = "$n" }
+                else -> { bg.setColor(LOOKED); t.text = "$n" }
+            }
+            t.background = bg
+            val when_ = fmt.format(java.util.Date(run.optLong("start")))
+            t.contentDescription = if (n == null) "$when_: not rehearsed" else "$when_: looked $n times"
+            row.addView(t, LinearLayout.LayoutParams(dp(34), dp(34)).also { it.marginEnd = dp(4) })
+        }
+        if (recent.isNotEmpty()) {
+            label("\nAll scenes", 15f, TEXT, true)
+            val totals = LinearLayout(this); totals.orientation = LinearLayout.HORIZONTAL
+            for (r in recent) { val m = r.optJSONObject("scenes")!!; var t = 0; for (k in m.keys()) t += m.optInt(k); cell(totals, t, r) }
+            box.addView(totals)
+            label("Latest run: " + fmt.format(java.util.Date(recent.last().optLong("start"))), 12f, MUTED)
+            for (si in sc.scenes.indices) {
+                val k = sceneKey(si)
+                if (recent.none { it.optJSONObject("scenes")?.has(k) == true }) continue
+                label("\n" + k, 14f, TEXT, true)
+                val row = LinearLayout(this); row.orientation = LinearLayout.HORIZONTAL
+                val seen = ArrayList<Int>()
+                for (r in recent) { val m = r.optJSONObject("scenes")!!; val n = if (m.has(k)) m.optInt(k) else null; if (n != null) seen.add(n); cell(row, n, r) }
+                box.addView(row)
+                if (seen.size >= 2) label(if (seen.last() < seen.first()) "Getting there: ${seen.first()} looks at first, ${seen.last()} last time"
+                    else if (seen.last() == 0 && seen.first() == 0) "Solid every time" else "${seen.first()} looks at first, ${seen.last()} last time", 12f, MUTED)
+            }
+        }
+        val sv = ScrollView(this); sv.addView(box)
+        AlertDialog.Builder(this)
+            .setTitle("My progress")
+            .setView(sv)
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Start a new run") { _, _ -> startNewRun() }
+            .setNegativeButton("Clear history") { _, _ ->
+                AlertDialog.Builder(this).setTitle("Clear all your progress history?")
+                    .setMessage("The red marks on lines stay. This only clears the runs.")
+                    .setPositiveButton("Clear") { _, _ -> runs = JSONArray(); prefs.edit().putString("runs", "[]").apply() }
+                    .setNegativeButton("Cancel", null).show()
+            }
+            .show()
+    }
+
+    // ---------------- lines you looked at ----------------
+    /** Marks the line you're on now: the one you needed to look at. */
+    private fun markLooked() {
+        val fm = model ?: return
+        val u = fm.unitAt(minOf(p, fm.E.size - 1)) ?: return
+        val item = script?.scenes?.getOrNull(u.sceneIdx)?.items?.getOrNull(u.itemIdx) ?: return
+        setLooked(u.sceneIdx, u.itemIdx, item.looked + 1)
+        noteRehearsed(u.sceneIdx, 1)
+        Toast.makeText(this, "Marked \"${shorten(item.t).take(40)}\"" + (if (item.looked > 1) " (${item.looked} times)" else ""), Toast.LENGTH_SHORT).show()
+    }
+
+    /** Changes only the marks: no need to rebuild the following or restart the microphone. */
+    private fun setLooked(si: Int, ii: Int, n: Int) {
+        val item = script?.scenes?.getOrNull(si)?.items?.getOrNull(ii) ?: return
+        item.looked = max(0, n)
+        item.lookedAt = if (n > 0) System.currentTimeMillis() else 0L
+        redrawKeepingPlace()
+    }
+
+    private fun redrawKeepingPlace() {
+        val fm = model ?: return
+        val y = scroll.scrollY
+        val keep = p
+        render(fm)
+        p = -1
+        setPos(keep, smooth = false, force = false)
+        text.post { scroll.scrollTo(0, y) }
+        saveScript()
+        broadcastScript()
+    }
+
+    private fun showLooked() {
+        val sc = script ?: return
+        val list = ArrayList<Triple<Int, Int, Item>>()
+        sc.scenes.forEachIndexed { si, s -> s.items.forEachIndexed { ii, it -> if (it.cue == null && it.looked > 0) list.add(Triple(si, ii, it)) } }
+        if (list.isEmpty()) { toast("No marks yet. Tap \"I looked\" whenever you need to look at the script."); return }
+        list.sortWith(compareByDescending<Triple<Int, Int, Item>> { it.third.looked }.thenBy { it.first }.thenBy { it.second })
+        val labels = list.map { (si, _, it) -> "${it.looked}x  ${sc.scenes[si].id}  ${shorten(it.t)}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Lines I've looked at (${list.size})")
+            .setItems(labels) { _, which ->
+                val (si, ii, _) = list[which]
+                model?.let { m -> tail.clear(); setPos(m.posFor(si, ii, 0), force = true) }
+            }
+            .setNeutralButton("Clear all marks") { _, _ ->
+                AlertDialog.Builder(this).setTitle("Clear all the marks?")
+                    .setPositiveButton("Clear") { _, _ ->
+                        for (s in sc.scenes) for (it in s.items) { it.looked = 0; it.lookedAt = 0 }
+                        redrawKeepingPlace()
+                    }.setNegativeButton("Cancel", null).show()
+            }
+            .setNegativeButton("Close", null)
             .show()
     }
 
@@ -684,6 +930,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         viewRef()?.let { o.put("view", JSONArray(it.toList())) }
         o.put("paused", paused)
         o.put("font", fontScale.toDouble())
+        o.put("show", showLevel)
         o.put("status", statusText)
         o.put("live", statusLive)
         o.put("title", titleView.text.toString())
@@ -729,6 +976,9 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                     "font" -> changeFont(o.optDouble("delta", 0.0).toFloat())
                     "scroll" -> { val r = ref("ref") ?: return@runOnUiThread
                         charFor(r[0], r.getOrElse(1) { -1 }, r.getOrElse(2) { -1 })?.let { scrollToChar(it, true) } }
+                    "looked" -> markLooked()
+                    "show" -> setShow(o.optInt("level", 0))
+                    "unlook" -> setLooked(o.optInt("si", -1), o.optInt("ii", -1), 0)
                     "edit" -> edit(o.optString("op"), o.optInt("si", -1), o.optInt("ii", -1), o.optInt("wi", -1),
                         o.optBoolean("value", true), if (o.has("t")) o.optString("t") else null)
                 }
