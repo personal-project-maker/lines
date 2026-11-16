@@ -12,6 +12,8 @@ class Item(val cue: String?, var t: String, val u: String?) {
     var skip = false
     val skipWords = HashSet<Int>()
     var orig: String? = null
+    var looked = 0                  // times you've had to look at this line
+    var lookedAt = 0L
     var extra: JSONObject? = null   // any other fields, kept as they were
 
     fun words(): List<String> = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
@@ -37,6 +39,7 @@ class Script(val title: String, val scenes: List<Scene>) {
                 if (it.skip) io.put("skip", true) else io.remove("skip")
                 if (it.skipWords.isNotEmpty()) io.put("skipWords", JSONArray(it.skipWords.sorted())) else io.remove("skipWords")
                 if (it.orig != null) io.put("orig", it.orig) else io.remove("orig")
+                if (it.looked > 0) { io.put("looked", it.looked); io.put("lookedAt", it.lookedAt) } else { io.remove("looked"); io.remove("lookedAt") }
                 items.put(io)
             }
             so.put("items", items)
@@ -176,8 +179,10 @@ object ScriptLoader {
                 val sw = it.optJSONArray("skipWords")
                 if (sw != null) for (k in 0 until sw.length()) item.skipWords.add(sw.optInt(k))
                 if (it.has("orig")) item.orig = it.optString("orig")
+                item.looked = it.optInt("looked", 0)
+                item.lookedAt = it.optLong("lookedAt", 0L)
                 val extra = JSONObject(it.toString())
-                for (key in listOf("cue", "t", "u", "skip", "skipWords", "orig")) extra.remove(key)
+                for (key in listOf("cue", "t", "u", "skip", "skipWords", "orig", "looked", "lookedAt")) extra.remove(key)
                 if (extra.length() > 0) item.extra = extra
                 items.add(item)
             }
