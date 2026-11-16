@@ -139,6 +139,7 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         val room = prefs.getString("room", null)
         val key = prefs.getString("key", null)
         if (room != null && key != null) online.setCredentials(room, key) else saveNewCredentials()
+        online.route = prefs.getInt("relayRoute", 0).coerceIn(0, OnlineLink.ROUTES.size - 1)
         buildUi()
         loadSavedScript()
         loadSpeechModel()
@@ -1228,7 +1229,10 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     }
 
     override fun onRemoteStatus() {
-        runOnUiThread { refreshShare?.invoke() }
+        runOnUiThread {
+            if (online.connected) prefs.edit().putInt("relayRoute", online.route).apply()
+            refreshShare?.invoke()
+        }
     }
 
     override fun onRemoteMessage(json: String) {
@@ -1299,7 +1303,12 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
             prefs.edit().putBoolean("shareOnline", online.wanted).apply()
             refreshShare?.invoke()
         }
-        val onlineSend = button("Send link") { sendLink(online.link()) }
+        val onlineSend = button("Send link") {
+            if (online.wanted && !online.connected) toast("Not connected yet. The link may change once it connects.")
+            prefs.edit().putString("sentLink", online.link()).apply()
+            sendLink(online.link())
+            refreshShare?.invoke()
+        }
         row(onlineToggle, onlineSend)
         row(button("Make a new link (the old one stops working)") {
             val was = online.wanted
@@ -1318,10 +1327,13 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
                 else -> "On at http://${ips.first()}:${local.port}/" + (if (local.viewers > 0) "\n${local.viewers} connected" else "")
             }
             onlineToggle.text = if (online.wanted) "Turn off" else "Turn on"
+            val sent = prefs.getString("sentLink", null)
             onlineStatus.text = when {
                 !online.wanted -> "Off"
-                online.connected -> "On and connected"
-                else -> "Connecting..."
+                online.connected -> "On and connected through ${online.relayName()}" +
+                    if (sent != null && sent != online.link()) "\nThe link has changed since you last sent it. Send it again." else ""
+                else -> "Connecting through ${online.relayName()}..." +
+                    if (online.lastError.isNotEmpty()) "\nLast problem: ${online.lastError}" else ""
             }
         }
         refreshShare?.invoke()

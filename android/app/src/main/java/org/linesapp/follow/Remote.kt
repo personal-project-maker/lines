@@ -195,6 +195,12 @@ class OnlineLink(private val host: RemoteHost) {
         private set
     @Volatile var wanted = false
         private set
+    /** Which way of reaching a relay we're using or trying (index into ROUTES). */
+    @Volatile var route = 0
+    /** Plain-words reason the last attempt failed, for the share screen. */
+    @Volatile var lastError = ""
+        private set
+    private var generation = 0
     private val rnd = SecureRandom()
 
     fun setCredentials(room: String, keyB64Url: String) {
@@ -210,22 +216,42 @@ class OnlineLink(private val host: RemoteHost) {
             Base64.encodeToString(k, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING))
     }
 
-    fun link(): String = "$PAGE#r=$room&k=$keyB64Url"
+    /** The link to send. It names the relay when it isn't the page's default one. */
+    fun link(): String {
+        val pageBroker = ROUTES[route].second
+        return "$PAGE#r=$room&k=$keyB64Url" + if (pageBroker.isEmpty()) "" else "&b=" + java.net.URLEncoder.encode(pageBroker, "UTF-8")
+    }
+
+    fun relayName(): String = ROUTES[route].third
 
     fun start() {
         if (wanted) return
         wanted = true
+        lastError = ""
+        connect(++generation, route, 0)
+    }
+
+    /** Tries one route; on failure moves on to the next, pausing after a full round. */
+    private fun connect(gen: Int, r: Int, tried: Int) {
+        if (!wanted || gen != generation) return
+        route = r
+        host.onRemoteStatus()
         Thread {
+            val uri = ROUTES[r].first
             try {
-                val c = MqttAsyncClient(BROKER, "lf-" + room.take(8) + "-" + System.currentTimeMillis().toString(36), MemoryPersistence())
+                val c = MqttAsyncClient(uri, "lf" + room.take(6) + java.lang.Long.toString(System.nanoTime() % 1000000000L, 36), MemoryPersistence())
                 c.setCallback(object : MqttCallbackExtended {
                     override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                        if (gen != generation) return
                         connected = true
+                        lastError = ""
                         try { c.subscribe("linesfollow/$room/down", 0) } catch (_: Exception) {}
                         host.onRemoteStatus()
                         host.onRemoteJoined()
                     }
-                    override fun connectionLost(cause: Throwable?) { connected = false; host.onRemoteStatus() }
+                    override fun connectionLost(cause: Throwable?) {
+                        connected = false; lastError = describe(cause); host.onRemoteStatus()
+                    }
                     override fun messageArrived(topic: String?, message: MqttMessage?) {
                         val plain = decrypt(message?.payload ?: return) ?: return
                         host.onRemoteMessage(plain)
@@ -236,26 +262,51 @@ class OnlineLink(private val host: RemoteHost) {
                 o.isCleanSession = true
                 o.isAutomaticReconnect = true
                 o.keepAliveInterval = 30
-                o.connectionTimeout = 20
+                o.connectionTimeout = 10
                 o.maxInflight = 50
                 client = c
                 c.connect(o, null, object : IMqttActionListener {
-                    override fun onSuccess(asyncActionToken: IMqttToken?) {}
+                    override fun onSuccess(asyncActionToken: IMqttToken?) {
+                        // connectComplete normally reports this; make sure the screen updates either way
+                        if (gen != generation) return
+                        if (!connected) { connected = true; lastError = ""; try { c.subscribe("linesfollow/$room/down", 0) } catch (_: Exception) {}
+                            host.onRemoteStatus(); host.onRemoteJoined() }
+                    }
                     override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
-                        connected = false; host.onRemoteStatus()
-                        // try again shortly while sharing is still on
-                        Thread { Thread.sleep(5000); if (wanted && !connected) { stop(); start() } }.start()
+                        fail(gen, r, tried, c, describe(exception))
                     }
                 })
-            } catch (e: Exception) {
-                connected = false; host.onRemoteStatus()
+            } catch (e: Throwable) {
+                fail(gen, r, tried, null, describe(e))
             }
         }.start()
+    }
+
+    private fun fail(gen: Int, r: Int, tried: Int, c: MqttAsyncClient?, why: String) {
+        if (gen != generation) return
+        connected = false
+        lastError = "${ROUTES[r].third}: $why"
+        try { c?.close(true) } catch (_: Throwable) {}
+        if (client === c) client = null
+        host.onRemoteStatus()
+        val next = (r + 1) % ROUTES.size
+        val wait = if (tried + 1 >= ROUTES.size) 10000L else 300L
+        Thread { Thread.sleep(wait); connect(gen, next, if (tried + 1 >= ROUTES.size) 0 else tried + 1) }.start()
+    }
+
+    private fun describe(t: Throwable?): String {
+        if (t == null) return "connection dropped"
+        val parts = ArrayList<String>()
+        var x: Throwable? = t
+        var n = 0
+        while (x != null && n < 3) { (x.message ?: x.javaClass.simpleName).let { if (it !in parts) parts.add(it) }; x = x.cause; n++ }
+        return parts.joinToString(": ")
     }
 
     fun stop() {
         wanted = false
         connected = false
+        generation++
         val c = client
         client = null
         Thread {
@@ -291,7 +342,12 @@ class OnlineLink(private val host: RemoteHost) {
     } catch (e: Exception) { null }
 
     companion object {
-        const val BROKER = "ssl://broker.hivemq.com:8883"
         const val PAGE = "https://personal-project-maker.github.io/lines/remote.html"
+        /** How the phone connects, what the web page should use (blank = its default), and a name to show. */
+        val ROUTES = listOf(
+            Triple("wss://broker.hivemq.com:8884/mqtt", "", "Relay 1 (web)"),
+            Triple("ssl://broker.hivemq.com:8883", "", "Relay 1 (direct)"),
+            Triple("wss://broker.emqx.io:8084/mqtt", "wss://broker.emqx.io:8084/mqtt", "Relay 2 (web)"),
+            Triple("ssl://broker.emqx.io:8883", "wss://broker.emqx.io:8084/mqtt", "Relay 2 (direct)"))
     }
 }
