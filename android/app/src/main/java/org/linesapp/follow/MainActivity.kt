@@ -103,6 +103,10 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
     private val online = OnlineLink(this)
     private var shareDialog: AlertDialog? = null
     private var refreshShare: (() -> Unit)? = null
+    private var editMode = false
+    private lateinit var performBtn: Button
+    private lateinit var editBtn: Button
+    private lateinit var scrollBg: GradientDrawable
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -196,8 +200,19 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         statusRow.addView(sceneSpinner, LinearLayout.LayoutParams(dp(150), ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(statusRow)
 
+        // Perform: touching only scrolls, a tap moves you there. Edit: a tap opens skip and wording options.
+        val modeRow = LinearLayout(this)
+        modeRow.orientation = LinearLayout.HORIZONTAL
+        modeRow.setPadding(0, 0, 0, dp(8))
+        performBtn = button("Perform") { setEditMode(false) }
+        editBtn = button("Edit script") { setEditMode(true) }
+        performBtn.minHeight = dp(44); editBtn.minHeight = dp(44)
+        modeRow.addView(performBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.marginEnd = dp(6) })
+        modeRow.addView(editBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(modeRow)
+
         scroll = ScrollView(this)
-        val scrollBg = GradientDrawable(); scrollBg.cornerRadius = dp(18).toFloat(); scrollBg.setColor(PANEL)
+        scrollBg = GradientDrawable(); scrollBg.cornerRadius = dp(18).toFloat(); scrollBg.setColor(PANEL)
         scroll.background = scrollBg
         text = TextView(this)
         text.setTextColor(TEXT)
@@ -211,19 +226,17 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         // tap a word to move there; press and hold for skip and edit options
         val taps = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
-            override fun onSingleTapUp(e: MotionEvent): Boolean {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 val off = text.getOffsetForPosition(e.x, e.y)
+                if (editMode) { showEditMenu(off); return true }
                 val w = wordAtChar(off) ?: return false
                 val fm = model ?: return false
                 tail.clear()
                 setPos(fm.posFor(w.si, w.ii, w.wi))
                 return true
             }
-            override fun onLongPress(e: MotionEvent) {
-                val off = text.getOffsetForPosition(e.x, e.y)
-                showEditMenu(off)
-            }
         })
+        taps.setIsLongpressEnabled(false)
         text.setOnTouchListener { _, ev -> taps.onTouchEvent(ev); false }
 
         val bottom = LinearLayout(this)
@@ -237,12 +250,27 @@ class MainActivity : Activity(), RecognitionListener, RemoteHost {
         root.addView(bottom)
 
         setContentView(root)
+        setEditMode(false)
 
         scroll.post {
             val h = scroll.height
             text.setPadding(dp(18), (h * 0.3).toInt(), dp(18), (h * 0.65).toInt())
             setPos(p, smooth = false, force = true)
         }
+    }
+
+    private fun setEditMode(on: Boolean) {
+        editMode = on
+        fun style(b: Button, active: Boolean) {
+            val bg = GradientDrawable(); bg.cornerRadius = dp(14).toFloat()
+            bg.setColor(if (active) ACCENT else PANEL2)
+            b.background = bg
+            b.setTextColor(if (active) Color.parseColor("#1B1608") else TEXT)
+            b.contentDescription = b.text.toString() + if (active) ", selected" else ""
+        }
+        style(performBtn, !on); style(editBtn, on)
+        scrollBg.setStroke(if (on) dp(3) else 0, ACCENT)
+        if (on) toast("Edit mode: tap a word or line to skip it or change it")
     }
 
     private fun showMenu(anchor: View) {
